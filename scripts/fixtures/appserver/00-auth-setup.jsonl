@@ -1,0 +1,2 @@
+{"event":"login --with-api-key","exitCode":0,"stdout":"","stderr":"Reading API key from stdin...\nSuccessfully logged in"}
+{"event":"login status","exitCode":0,"stdout":"","stderr":"Logged in using an API key - sk-[REDACTED]"}

@@ -1,0 +1,36 @@
+{
+  "name": "@eduagent/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "EduAgent agent host: Fastify + Prisma (SQLite) + Clerk/local auth. Spawns codex app-server in Phase 1.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "test": "vitest run",
+    "db:setup": "tsx scripts/prisma-env.ts generate && tsx scripts/prisma-env.ts migrate deploy",
+    "db:migrate:dev": "tsx scripts/prisma-env.ts migrate dev"
+  },
+  "dependencies": {
+    "@clerk/backend": "^2.33.0",
+    "@eduagent/shared": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/websocket": "^11.2.0",
+    "@prisma/client": "^6.19.0",
+    "dotenv": "^17.2.0",
+    "fastify": "^5.6.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ws": "^8.18.0",
+    "pino-pretty": "^13.0.0",
+    "prisma": "^6.19.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "ws": "^8.18.0"
+  }
+}

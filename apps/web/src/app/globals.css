@@ -1,0 +1,172 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * EduAgent design tokens — plans/05_design_system.md §2–§4.
+ *
+ * Dark is the PRIMARY theme and the default: the root layout puts `class="dark"`
+ * on <html> (html-class strategy). `:root` carries the light palette so removing
+ * the class yields a usable, AA-compliant light theme.
+ *
+ * Vocabulary bridge (05 §2 → Tailwind utilities, mapped in @theme below):
+ *   --bg → bg-background · --surface → bg-card / bg-surface · --text → text-foreground
+ *   --text-muted → text-muted-foreground · --accent (brand violet) → *-primary
+ * NOTE: shadcn's `accent` slot is a subtle hover fill (surface-2), NOT the brand
+ * violet. For violet, always use `primary`.
+ */
+
+:root {
+  /* Light palette (05 §2): same hues on paper; accent darkened for AA. */
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --surface-2: #f2f1ec;
+  --border: #e5e3dc;
+  --text: #1a1d26;
+  --text-muted: #5d6474;
+  --accent: #5b4bd4;
+  --accent-soft: #5b4bd41f;
+  /* Status hues darkened for AA on paper (only accent is pinned by the spec;
+     these are derived — tune in the Phase 5 light-theme pass if needed). */
+  --success: #1a9e68;
+  --warn: #b57603;
+  --danger: #d63653;
+  --diff-add: #2ea04326;
+  --diff-del: #f851491f;
+
+  /* Mastery ramp (05 §2) — 5 stops, brightness ramp, identical in both themes.
+     Fading is NEVER encoded by hue-shifting this ramp: overlay --warn at 35%
+     plus an explicit decay glyph. */
+  --mastery-0: #2a2e3a;
+  --mastery-25: #3b4c6b;
+  --mastery-50: #2f6f8f;
+  --mastery-75: #2e9e7a;
+  --mastery-100: #3ecf8e;
+
+  /* Shape (05 §4): 10px cards · 8px controls · 6px chips. */
+  --radius: 10px;
+}
+
+.dark {
+  /* Dark palette (05 §2) — the primary theme. */
+  --bg: #0b0d12;
+  --surface: #12151d;
+  --surface-2: #1a1e28;
+  --border: #252a37;
+  --text: #e8eaf0;
+  --text-muted: #8b93a7;
+  --accent: #7c6aef;
+  --accent-soft: #7c6aef1f;
+  --success: #3ecf8e;
+  --warn: #f5a623;
+  --danger: #f0526a;
+  --diff-add: #2ea04326;
+  --diff-del: #f851491f;
+}
+
+@theme inline {
+  /* Typography (05 §3): Newsreader display serif · Geist Sans UI · JetBrains Mono. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Type scale (05 §3): 1.6 prose, 1.2 headings. Utilities: text-caption … text-display. */
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.5;
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.6;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.6;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.6;
+  --text-h4: 1.25rem;
+  --text-h4--line-height: 1.2;
+  --text-h3: 1.5rem;
+  --text-h3--line-height: 1.2;
+  --text-h2: 1.875rem;
+  --text-h2--line-height: 1.2;
+  --text-h1: 2.375rem;
+  --text-h1--line-height: 1.2;
+  --text-display: 3.25rem;
+  --text-display--line-height: 1.1;
+
+  /* shadcn/ui semantic slots mapped onto EduAgent tokens. */
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface-2);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--surface-2);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+
+  /* Product tokens as utilities (bg-surface-2, text-success, bg-mastery-75, …). */
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-diff-add: var(--diff-add);
+  --color-diff-del: var(--diff-del);
+  --color-mastery-0: var(--mastery-0);
+  --color-mastery-25: var(--mastery-25);
+  --color-mastery-50: var(--mastery-50);
+  --color-mastery-75: var(--mastery-75);
+  --color-mastery-100: var(--mastery-100);
+
+  /* Radius ladder (05 §4): rounded-sm = chips 6px · rounded-md = controls 8px ·
+     rounded-lg = cards 10px. Semantic aliases for readability. */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-card: var(--radius);
+  --radius-control: calc(var(--radius) - 2px);
+  --radius-chip: calc(var(--radius) - 4px);
+
+  /* Depth (05 §4): borders over shadows; shadows ONLY for overlays
+     (drawer, popover, command palette) — soft, large-blur, low-alpha. */
+  --shadow-overlay: 0 24px 64px -16px rgb(0 0 0 / 0.55), 0 8px 24px -12px rgb(0 0 0 / 0.35);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background font-sans text-body text-foreground antialiased;
+  }
+
+  /* Visible focus ring on everything interactive (05 §9): accent, 2px offset.
+     Zero-specificity so component-level focus-visible styles can override. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent);
+    color: #ffffff;
+  }
+}
+
+/* Numeric UI (gauges, tickers, timers, deltas) — 05 §3. Tailwind's built-in
+   `tabular-nums` utility works too; this alias reads as intent in JSX. */
+@utility numeric {
+  font-variant-numeric: tabular-nums;
+}

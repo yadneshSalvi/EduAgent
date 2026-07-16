@@ -1,0 +1,26 @@
+plans/
+.env
+
+# dependencies
+node_modules/
+
+# build output
+.next/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+.turbo/
+
+# runtime data (SQLite db + per-user workspaces)
+data/
+
+# local env overrides (keep .env.example tracked)
+.env.local
+.env.*.local
+
+# logs & OS noise
+*.log
+.DS_Store
+.eslintcache

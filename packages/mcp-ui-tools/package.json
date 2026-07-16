@@ -1,0 +1,12 @@
+{
+  "name": "@eduagent/mcp-ui-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP stdio server exposing UI tools to the Codex agent — placeholder until Phase 2 (tool arg schemas already live in @eduagent/shared)",
+  "scripts": {
+    "build": "echo '[@eduagent/mcp-ui-tools] placeholder: nothing to build yet'",
+    "typecheck": "echo '[@eduagent/mcp-ui-tools] placeholder: nothing to typecheck yet'",
+    "lint": "echo '[@eduagent/mcp-ui-tools] placeholder: nothing to lint yet'",
+    "test": "echo '[@eduagent/mcp-ui-tools] placeholder: no tests yet'"
+  }
+}

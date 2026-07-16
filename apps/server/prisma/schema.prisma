@@ -1,0 +1,122 @@
+// EduAgent app plumbing (SQLite). The learner model lives in per-user git
+// workspaces (plans/02_data_model.md §1–4) — nothing pedagogically meaningful
+// lives only in this database.
+//
+// Prisma ≥ 6.2 required: that's when `Json` on SQLite landed (stored as TEXT).
+// SQLite supports no Json filtering in Prisma; every Json column below is an
+// opaque payload — written whole, zod-parsed on read, never queried into.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  authId        String?  @unique // Clerk user id; null until linked (seeded users, AUTH_MODE=local)
+  handle        String   @unique // stable internal name, e.g. "alex" (seeding, local mode, logs)
+  displayName   String
+  avatarSeed    String   @default("") // deterministic avatar
+  timezone      String   @default("UTC")
+  workspacePath String // data/workspaces/<id>
+  createdAt     DateTime @default(now())
+  threads       Thread[]
+  exams         Exam[]
+  exercises     Exercise[]
+  activity      ActivityEvent[]
+}
+
+// No session table: Clerk owns sessions (agent host verifies its JWTs statelessly).
+// A User row is auto-provisioned on first authenticated request (authId = Clerk user id).
+// The seeded "alex" row starts with authId=null; POST /auth/demo-login creates/links a
+// Clerk user for it on first use. AUTH_MODE=local signs a cookie carrying the User id directly.
+
+model Thread {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  codexThreadId String   @unique
+  mode          String // "learn" | "review" | "exam"
+  topicSlug     String?
+  trackSlug     String?
+  title         String
+  status        String   @default("active") // active | archived
+  forkedFromId  String? // exam threads: parent learn thread
+  sessionToken  String   @unique // MCP ui-tool auth (rotate per thread)
+  createdAt     DateTime @default(now())
+  lastActiveAt  DateTime @default(now())
+  items         ItemMirror[]
+}
+
+// Mirror of streamed items for instant history render + resilience
+model ItemMirror {
+  id          String   @id @default(cuid())
+  threadId    String
+  thread      Thread   @relation(fields: [threadId], references: [id])
+  codexItemId String?
+  role        String // user | agent | system
+  kind        String // message | reasoning | exec | tool_call | quiz | exercise_ref
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  @@index([threadId, createdAt])
+}
+
+model Exercise {
+  id          String   @id // agent-supplied slug, e.g. "ex-014"
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  threadId    String
+  language    String
+  title       String
+  prompt      String // markdown shown to user
+  starterCode String
+  concepts    Json // string[] targeted concept ids
+  difficulty  String // easy | medium | hard
+  status      String   @default("open") // open | passed | failed | abandoned
+  createdAt   DateTime @default(now())
+  attempts    ExerciseAttempt[]
+}
+
+model ExerciseAttempt {
+  id         String    @id @default(cuid())
+  exerciseId String
+  exercise   Exercise  @relation(fields: [exerciseId], references: [id])
+  code       String
+  verdict    String? // passed | failed | error
+  feedback   String? // agent's markdown feedback
+  createdAt  DateTime  @default(now())
+  gradedAt   DateTime?
+}
+
+model Exam {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  threadId    String // the forked thread
+  trackSlug   String
+  config      Json // duration, sections requested
+  questions   Json // full exam JSON from ui_create_exam
+  answers     Json?
+  result      Json? // per-question verdicts, score, readiness delta
+  status      String    @default("draft") // draft (generation turn running) | ready (questions persisted) | in_progress | submitted | graded
+  startedAt   DateTime?
+  submittedAt DateTime?
+  gradedAt    DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model ActivityEvent {
+  id     String   @id @default(cuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id])
+  kind   String // session_start, exercise_pass, commit, exam_graded…
+  meta   Json
+  at     DateTime @default(now())
+
+  @@index([userId, at])
+}

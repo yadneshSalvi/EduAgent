@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+onlyBuiltDependencies:
+  - esbuild
+  # Prisma downloads its engines via lifecycle scripts (pnpm 10 blocks them by default).
+  - prisma
+  - '@prisma/client'
+  - '@prisma/engines'
