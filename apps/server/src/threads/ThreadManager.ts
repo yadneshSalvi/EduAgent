@@ -8,16 +8,23 @@
  * Mode note (web contract, apps/web onboarding-wizard): the web always
  * creates `mode:"learn"` threads; a learner without a committed profile.md
  * gets ONBOARDING developerInstructions on that thread. Instructions are
- * rebuilt from current state on every thread/resume, so the onboarding→learn
- * transition happens naturally after the next server or codex restart.
+ * rebuilt from current state on every thread/resume — but note codex 0.144.4
+ * DROPS resume-time developerInstructions (PROTOCOL_NOTES Phase 4A addendum),
+ * so the onboarding→learn rotation never actually reaches the model; it is
+ * benign only because both templates share the thread's session token. Exam
+ * threads, where rotation is correctness-critical, deliver instructions via
+ * thread/inject_items instead (see resume()).
  */
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { Prisma, PrismaClient, Thread } from '@prisma/client';
 import type { ThreadMode, WsEvent } from '@eduagent/shared';
 import type { AppServerClient, CodexLogger, ThreadEvent } from '../codex/index.js';
+import { parseExamConfig, type ExamTarget } from '../learning/exam-config.js';
 import {
   buildContextEnvelope,
+  buildExamGenerateInstructions,
+  buildExamGradeInstructions,
   buildLearnInstructions,
   buildOnboardingInstructions,
   buildReviewInstructions,
@@ -62,6 +69,32 @@ export interface ThreadService {
   resumeAll(): Promise<void>;
 }
 
+/** What ExamService needs to fork an exam thread (see forkForExam). */
+export interface ExamForkOptions {
+  examId: string;
+  trackSlug: string;
+  durationMin: number;
+  /** Server-computed bottom-5 weighted concepts, weakest first. */
+  targeting: ExamTarget[];
+}
+
+/**
+ * The exam-mode extension of ThreadService (plans/03 §3.1 `forkForExam`).
+ * Kept separate so route/gateway fakes keep implementing the lean interface.
+ */
+export interface ExamThreadService extends ThreadService {
+  forkForExam(parent: Thread, opts: ExamForkOptions): Promise<Thread>;
+  /**
+   * Forces the next turn on this thread to re-`thread/resume` with freshly
+   * built developerInstructions — and, for exam threads, to INJECT them as a
+   * developer message (the only channel 0.144.4 actually delivers on an
+   * existing thread). The rotation mechanism when a thread's mode context
+   * changes materially (plans/03 §3.1; exam threads rotate generate → grade
+   * instructions at submit).
+   */
+  invalidateInstructions(thread: Thread): void;
+}
+
 export interface ThreadManagerDeps {
   prisma: PrismaClient;
   client: AppServerClient;
@@ -101,6 +134,17 @@ interface TurnWaiter {
 
 const NOOP_LOGGER: CodexLogger = { debug() {}, info() {}, warn() {}, error() {} };
 
+/**
+ * Prefixed to the exam instruction block injected into a forked exam thread
+ * (see resume()). The fork's transcript still contains the tutor's developer
+ * instructions with the TUTOR's session_token — observed live: without this
+ * supersession the model authenticates ui_create_exam with the parent token.
+ */
+export const EXAM_INJECT_PREAMBLE =
+  'INSTRUCTION UPDATE for this thread. Everything below supersedes ALL earlier ' +
+  'developer instructions above, including any earlier session_token — the ONLY ' +
+  'valid session_token for ui_* tool calls on this thread is the one stated below.\n\n';
+
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
 
 /** Activity-chip label cap; the web settles chips by exact label match. */
@@ -113,7 +157,7 @@ function clip(text: string, max: number): string {
   return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
 }
 
-export class ThreadManager implements ThreadService {
+export class ThreadManager implements ExamThreadService {
   private readonly prisma: PrismaClient;
   private readonly client: AppServerClient;
   private readonly workspaces: WorkspaceManager;
@@ -183,6 +227,63 @@ export class ThreadManager implements ThreadService {
     );
     this.pendingEnsures.set(key, promise);
     return promise;
+  }
+
+  /**
+   * Forks the learner's tutor thread into an EXAM thread (plans/01 §4.2 —
+   * the exam agent inherits full pedagogical context, then diverges).
+   * ExamService creates the Exam row (id = opts.examId) right after, and the
+   * fork's FIRST turn re-resumes AND INJECTS instructions rebuilt from that
+   * row (see resume()). The injection is mandatory: codex 0.144.4 drops
+   * `developerInstructions` on thread/fork AND thread/resume — the fork runs
+   * on the parent's transcript instructions (observed live in the Phase 4
+   * E2E, twice: the model kept tutoring with the PARENT's session token).
+   * We still pass them at fork for forward-compat, but the thread
+   * deliberately stays out of resumedThreads so ensureResumed delivers the
+   * real exam template before any turn runs. No auto-greeting: the
+   * generation turn is the fork's first turn.
+   */
+  async forkForExam(parent: Thread, opts: ExamForkOptions): Promise<Thread> {
+    const workspace = await this.workspaces.ensureWorkspace(parent.userId);
+    const sessionToken = randomUUID();
+    const forked = await this.client.forkThread({
+      threadId: parent.codexThreadId,
+      cwd: workspace.path,
+      developerInstructions: buildExamGenerateInstructions({
+        sessionToken,
+        examId: opts.examId,
+        trackSlug: opts.trackSlug,
+        durationMin: opts.durationMin,
+        targeting: opts.targeting,
+      }),
+    });
+    const thread = await this.prisma.thread.create({
+      data: {
+        userId: parent.userId,
+        codexThreadId: forked.thread.id,
+        mode: 'exam',
+        trackSlug: opts.trackSlug,
+        title: `Mock exam — ${opts.trackSlug}`,
+        forkedFromId: parent.id,
+        sessionToken,
+      },
+    });
+    this.attach(thread);
+    this.log.info(
+      {
+        threadId: thread.id,
+        codexThreadId: thread.codexThreadId,
+        parentThreadId: parent.id,
+        examId: opts.examId,
+        trackSlug: opts.trackSlug,
+      },
+      'exam thread forked',
+    );
+    return thread;
+  }
+
+  invalidateInstructions(thread: Thread): void {
+    this.resumedThreads.delete(thread.codexThreadId);
   }
 
   /**
@@ -315,7 +416,12 @@ export class ThreadManager implements ThreadService {
     topicSlug: string | null;
     sessionToken: string;
     onboarded: boolean;
+    /** Thread ROW id — required to rebuild exam instructions from the Exam row. */
+    threadRowId?: string;
   }): Promise<string> {
+    if (opts.mode === 'exam') {
+      return this.examInstructions(opts.threadRowId, opts.sessionToken);
+    }
     // Review threads exist only for learners with an SRS queue (ReviewService
     // guards on due items), so the onboarding branch never applies to them.
     if (opts.mode === 'review') {
@@ -334,6 +440,45 @@ export class ThreadManager implements ThreadService {
       sessionToken: opts.sessionToken,
       topicSlug: opts.topicSlug,
       isSessionStart: true,
+    });
+  }
+
+  /**
+   * Rebuilds an exam thread's developerInstructions from its Exam row: the
+   * generation template until the learner submits, the grading template from
+   * `submitted` on (ExamService flips the status BEFORE invalidating, so the
+   * rotation-triggered resume always sees the new phase).
+   */
+  private async examInstructions(threadRowId: string | undefined, sessionToken: string): Promise<string> {
+    if (threadRowId === undefined) {
+      throw new Error('exam instructions need the thread row id');
+    }
+    const exam = await this.prisma.exam.findFirst({
+      where: { threadId: threadRowId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (exam === null) {
+      // Only reachable in the tiny window between thread/fork and the Exam
+      // row insert (or after a crash inside it) — fail the resume loudly.
+      throw new Error(`exam thread ${threadRowId} has no Exam row`);
+    }
+    const config = parseExamConfig(exam.config);
+    if (exam.status === 'submitted' || exam.status === 'graded') {
+      return buildExamGradeInstructions({
+        sessionToken,
+        examId: exam.id,
+        trackSlug: exam.trackSlug,
+        ...(config.readinessBefore !== undefined
+          ? { readinessBefore: config.readinessBefore }
+          : {}),
+      });
+    }
+    return buildExamGenerateInstructions({
+      sessionToken,
+      examId: exam.id,
+      trackSlug: exam.trackSlug,
+      durationMin: config.durationMin,
+      targeting: config.targeting,
     });
   }
 
@@ -364,17 +509,42 @@ export class ThreadManager implements ThreadService {
   private async resume(thread: Thread): Promise<void> {
     const workspace = await this.workspaces.ensureWorkspace(thread.userId);
     const onboarded = await this.workspaces.hasCommittedProfile(thread.userId);
+    const developerInstructions = await this.instructionsFor({
+      userId: thread.userId,
+      mode: thread.mode as ThreadMode,
+      topicSlug: thread.topicSlug,
+      sessionToken: thread.sessionToken,
+      onboarded,
+      threadRowId: thread.id,
+    });
     await this.client.resumeThread({
       threadId: thread.codexThreadId,
       cwd: workspace.path,
-      developerInstructions: await this.instructionsFor({
-        userId: thread.userId,
-        mode: thread.mode as ThreadMode,
-        topicSlug: thread.topicSlug,
-        sessionToken: thread.sessionToken,
-        onboarded,
-      }),
+      developerInstructions,
     });
+    // codex 0.144.4 DROPS developerInstructions on thread/resume (and fork):
+    // instructions only ever reach the model as the developer message that
+    // thread/start writes into the transcript. An exam thread is a fork, so
+    // its transcript carries the PARENT tutor's instructions (and the tutor's
+    // session token) — inject the current-phase exam block as a developer
+    // message instead; a later injection supersedes an earlier one, and
+    // injected items persist in the rollout across restarts (all verified
+    // live — PROTOCOL_NOTES Phase 4 addendum). Learn/review/onboarding
+    // threads never need this: their instructions rode thread/start.
+    if (thread.mode === 'exam') {
+      await this.client.injectItems({
+        threadId: thread.codexThreadId,
+        items: [
+          {
+            type: 'message',
+            role: 'developer',
+            content: [
+              { type: 'input_text', text: EXAM_INJECT_PREAMBLE + developerInstructions },
+            ],
+          },
+        ],
+      });
+    }
     this.resumedThreads.add(thread.codexThreadId);
     this.log.info({ threadId: thread.id, codexThreadId: thread.codexThreadId }, 'thread resumed');
   }

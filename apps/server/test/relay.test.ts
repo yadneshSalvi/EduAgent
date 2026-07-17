@@ -414,8 +414,9 @@ describe('ui_grade_quiz', () => {
   });
 });
 
-describe('exam tools (inert until Phase 4)', () => {
-  it('returns a do-not-retry error for ui_create_exam and ui_grade_exam', async () => {
+describe('exam tools (active since Phase 4 — full coverage in relay-exam.test.ts)', () => {
+  it('rejects exam tool calls from a non-exam context with instructive errors', async () => {
+    // This learn thread owns no draft Exam row, so ui_create_exam refuses.
     const create = await call('ui_create_exam', {
       track: 'sql-interview',
       duration_min: 30,
@@ -428,8 +429,8 @@ describe('exam tools (inert until Phase 4)', () => {
         },
       ],
     });
-    expect(create.status).toBe(400);
-    expect((create.body as { error: string }).error).toMatch(/later phase/i);
+    expect(create.status).toBe(409);
+    expect((create.body as { error: string }).error).toMatch(/no draft exam/i);
     expect((create.body as { error: string }).error).toMatch(/do not retry/i);
 
     const grade = await call('ui_grade_exam', {
@@ -438,8 +439,8 @@ describe('exam tools (inert until Phase 4)', () => {
       total: 5,
       readiness_delta: 0.1,
     });
-    expect(grade.status).toBe(400);
-    expect((grade.body as { error: string }).error).toMatch(/later phase/i);
+    expect(grade.status).toBe(404);
+    expect((grade.body as { error: string }).error).toMatch(/exact exam id/i);
   });
 });
 

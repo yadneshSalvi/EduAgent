@@ -11,7 +11,7 @@ import type { PrismaClient } from '@prisma/client';
 import { WsGateway } from './api/gateway.js';
 import { AppServerClient, type CodexLogger, type ElicitationApprover, type HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
-import { DashboardService, ReviewService } from './learning/index.js';
+import { DashboardService, ExamService, ReviewService } from './learning/index.js';
 import { installedSkillsRoot, SKILL_NAMES } from './prompts/index.js';
 import { UiToolRelay } from './relay/index.js';
 import { ThreadManager } from './threads/index.js';
@@ -43,6 +43,7 @@ export interface AppServices {
   codexHealth: () => Promise<HealthProbe>;
   dashboard: DashboardService;
   review: ReviewService;
+  exams: ExamService;
 }
 
 export interface CreateServicesDeps {
@@ -61,8 +62,12 @@ export async function createServices({
 
   const gateway = new WsGateway(logger);
 
+  // Built before the relay: ui_grade_exam computes the exact post-exam
+  // readiness snapshot through it (plans/06 Phase 4 task 4).
+  const dashboard = new DashboardService({ prisma, workspaces, logger });
+
   const relay = new UiToolRelay(
-    { prisma, sink: gateway, workspaces, logger },
+    { prisma, sink: gateway, workspaces, dashboard, logger },
     { port: config.relayPort },
   );
   const relayPort = await relay.listen();
@@ -93,7 +98,6 @@ export async function createServices({
     throw err;
   }
 
-  const dashboard = new DashboardService({ prisma, workspaces, logger });
   const memory = new MemoryPipeline({
     workspaces,
     prisma,
@@ -105,6 +109,10 @@ export async function createServices({
   });
   threads = new ThreadManager({ prisma, client, workspaces, memory, sink: gateway, logger });
   const review = new ReviewService({ prisma, workspaces, threads, logger });
+  const exams = new ExamService({ prisma, workspaces, threads, dashboard, sink: gateway, logger });
+  // Deadline enforcement (plans/03 §3.5): expired in_progress exams
+  // auto-submit with their last autosaved answers. app.close() stops it.
+  exams.startSweep();
 
   return {
     workspaces,
@@ -116,6 +124,7 @@ export async function createServices({
     codexHealth: () => client.healthProbe(),
     dashboard,
     review,
+    exams,
   };
 }
 

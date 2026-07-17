@@ -9,6 +9,7 @@ import websocket from '@fastify/websocket';
 import type { PrismaClient } from '@prisma/client';
 import { authRoutes } from './api/auth.js';
 import { dashboardRoutes } from './api/dashboard.js';
+import { examRoutes } from './api/exams.js';
 import { exerciseRoutes } from './api/exercises.js';
 import type { WsGateway } from './api/gateway.js';
 import { healthRoutes } from './api/health.js';
@@ -20,7 +21,7 @@ import { wsRoutes } from './api/ws.js';
 import { createAuthProvider, type AuthedUser } from './auth/index.js';
 import type { HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
-import type { DashboardService, ReviewService } from './learning/index.js';
+import type { DashboardService, ExamService, ReviewService } from './learning/index.js';
 import type { ThreadService } from './threads/index.js';
 import type { WorkspaceManager } from './workspace/index.js';
 
@@ -38,6 +39,8 @@ declare module 'fastify' {
     /** Phase 3 services. */
     dashboard?: DashboardService;
     review?: ReviewService;
+    /** Phase 4 services. */
+    exams?: ExamService;
   }
 }
 
@@ -49,6 +52,8 @@ export interface AppServiceSet {
   codexHealth?: () => Promise<HealthProbe>;
   dashboard?: DashboardService;
   review?: ReviewService;
+  /** When present, decorated for routes and sweep-stopped on app.close(). */
+  exams?: ExamService;
   /** When present, closed on app.close() (terminates the codex child). */
   client?: { close(): Promise<void> };
   /** When present, closed on app.close() (stops the UiToolRelay listener). */
@@ -91,10 +96,13 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
     if (resolved.codexHealth) app.decorate('codexHealth', resolved.codexHealth);
     if (resolved.dashboard) app.decorate('dashboard', resolved.dashboard);
     if (resolved.review) app.decorate('review', resolved.review);
+    if (resolved.exams) app.decorate('exams', resolved.exams);
     const client = resolved.client;
     const relay = resolved.relay;
-    if (client || relay) {
+    const exams = resolved.exams;
+    if (client || relay || exams) {
       app.addHook('onClose', async () => {
+        exams?.stopSweep();
         await client?.close();
         await relay?.close();
       });
@@ -109,6 +117,7 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
   await app.register(dashboardRoutes);
   await app.register(memoryRoutes);
   await app.register(reviewRoutes);
+  await app.register(examRoutes);
   await app.register(wsRoutes);
 
   return app;

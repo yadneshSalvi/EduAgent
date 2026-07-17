@@ -5,6 +5,16 @@
  * token; the per-turn context envelope carries the fresh state digest.
  */
 export { buildContextEnvelope, type ContextEnvelopeOptions } from './envelope.js';
+export {
+  buildExamGenerateInstructions,
+  EXAM_GENERATE_KICKOFF_INPUT,
+  type ExamGenerateOptions,
+} from './modes/exam-generate.js';
+export {
+  buildExamGradeInstructions,
+  buildExamGradingTurn,
+  type ExamGradeOptions,
+} from './modes/exam-grade.js';
 export { buildLearnInstructions, type LearnModeOptions } from './modes/learn.js';
 export { buildOnboardingInstructions, type OnboardingModeOptions } from './modes/onboarding.js';
 export {
@@ -26,6 +36,7 @@ export {
 export { LEARNER_VOICE_RULES } from './voice.js';
 export {
   estimateTokens,
+  EXAM_INSTRUCTIONS_TOKEN_BUDGET,
   MODE_INSTRUCTIONS_TOKEN_BUDGET,
   ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET,
   STATE_DIGEST_TOKEN_BUDGET,

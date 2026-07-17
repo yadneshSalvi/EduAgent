@@ -19,3 +19,10 @@ export const MODE_INSTRUCTIONS_TOKEN_BUDGET = 800;
  * the instructions themselves — a deliberate exception to the lean budget.
  */
 export const ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET = 1_700;
+
+/**
+ * Exam templates carry the full generation/grading procedure plus the
+ * targeting list and integrity rules — a deliberate exception to the lean
+ * mode budget (the teach skill doesn't cover examining).
+ */
+export const EXAM_INSTRUCTIONS_TOKEN_BUDGET = 1_300;

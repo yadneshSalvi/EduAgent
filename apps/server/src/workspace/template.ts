@@ -82,6 +82,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# Exam integrity (plans/06 Phase 4 task 5): exam workdirs (hidden tests, answer
+# key, submissions) stay untracked until the grading turn force-adds them —
+# committed git objects are learner-readable via the memory explorer mid-exam.
+.exercises/exam-*/
 `;
 
 const SRS_QUEUE = `# Spaced-repetition queue — format guide in README.md.

@@ -6,6 +6,8 @@ export {
   GREETING_INPUT,
   ThreadManager,
   type EnsureThreadResult,
+  type ExamForkOptions,
+  type ExamThreadService,
   type ThreadEventSink,
   type ThreadManagerDeps,
   type ThreadService,

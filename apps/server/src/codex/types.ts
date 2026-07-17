@@ -35,6 +35,10 @@ export interface AppServerMethods {
   'thread/start': { params: v2.ThreadStartParams; result: v2.ThreadStartResponse };
   'thread/resume': { params: v2.ThreadResumeParams; result: v2.ThreadResumeResponse };
   'thread/fork': { params: v2.ThreadForkParams; result: v2.ThreadForkResponse };
+  'thread/inject_items': {
+    params: v2.ThreadInjectItemsParams;
+    result: v2.ThreadInjectItemsResponse;
+  };
   'turn/start': { params: v2.TurnStartParams; result: v2.TurnStartResponse };
   'turn/interrupt': { params: v2.TurnInterruptParams; result: v2.TurnInterruptResponse };
   'model/list': { params: v2.ModelListParams; result: v2.ModelListResponse };
@@ -219,6 +223,17 @@ export interface ForkThreadOptions {
   cwd?: string;
   developerInstructions?: string;
   model?: string;
+}
+
+export interface InjectItemsOptions {
+  threadId: string;
+  /**
+   * Raw Responses-API items appended to the thread's model-visible history —
+   * on 0.144.4 a developer-role message here is the ONLY way to deliver new
+   * instructions to an EXISTING thread (resume/fork drop developerInstructions;
+   * PROTOCOL_NOTES Phase 4 addendum).
+   */
+  items: JsonValue[];
 }
 
 export interface StartTurnOptions {

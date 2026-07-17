@@ -20,6 +20,7 @@ import type {
   ElicitationApprover,
   ForkThreadOptions,
   HealthProbe,
+  InjectItemsOptions,
   ResumeThreadOptions,
   SpawnAppServer,
   StartThreadOptions,
@@ -272,6 +273,21 @@ export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
       params.developerInstructions = opts.developerInstructions;
     }
     return this.request('thread/resume', params);
+  }
+
+  /**
+   * `thread/inject_items` — appends raw Responses-API items to the thread's
+   * model-visible history. On 0.144.4 a developer-role message here is the
+   * ONLY channel that delivers new instructions to an EXISTING thread:
+   * `developerInstructions` on thread/resume and thread/fork are silently
+   * dropped (verified live — PROTOCOL_NOTES Phase 4 addendum). Injected items
+   * persist in the rollout, so they survive codex restarts.
+   */
+  injectItems(opts: InjectItemsOptions): Promise<v2.ThreadInjectItemsResponse> {
+    return this.request('thread/inject_items', {
+      threadId: opts.threadId,
+      items: opts.items,
+    });
   }
 
   /** `thread/fork` — new thread id, full parent history (exam mode). */

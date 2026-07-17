@@ -217,4 +217,46 @@ With `effort:"medium", summary:"detailed"` on `turn/start`, the model emits **`i
 - **`command/exec` (the client-side app-server method) executes OUTSIDE the sandbox.** Nothing in the product uses it; never reach for it assuming seatbelt protection. Agent-initiated commands inside turns ARE sandboxed.
 - Under working API-key auth, `account/read` → `{account:{type:"apiKey"}, requiresOpenaiAuth:true}`; unauthenticated is strictly `account === null` (see §10 addendum above).
 - **(Phase 2) MCP env-table rendering VERIFIED live** (closes the §8 open item): `-c 'mcp_servers.<name>.env={KEY = "value", OTHER = "has spaces"}'` delivers the variables to the spawned MCP server process exactly (probe server dumped its env on 0.144.4; values with spaces survive). `mcpServerStatus/list` forces MCP server startup without spending a turn — the boot sequence uses it to assert the eduagent-ui registration is alive.
+- **(Phase 4) `thread/fork` IGNORES fork-time `developerInstructions` on 0.144.4.** The param is accepted by the schema (generated `ThreadForkParams` carries `developerInstructions?: string | null`) but the forked thread runs with the PARENT's developerInstructions. Observed live in the Phase 4 E2E: an exam fork given exam-generate instructions at fork time behaved as the parent tutor — it called `ui_create_exam` with the **parent learn thread's session_token** (which exists only in the parent's instructions) and an invented duration, proving the fork-time instructions never reached the model (rollouts `2026/07/17/rollout-...17-15-47...` and `...17-16-11...`). ⚠️ The "workaround" this bullet originally prescribed (`thread/resume` with new developerInstructions) is **WRONG — disproven live; see the Phase 4A addendum below**. The real mechanism is `thread/inject_items`.
+- ⚠️ **(Phase 4) CLAIM DISPROVEN:** "`thread/resume` on a thread the CURRENT child already knows swaps `developerInstructions` in place" — it does **not** (the claim was written before the post-fix E2E ever ran). See the Phase 4A addendum below for the rollout evidence.
 - **Skill discovery does NOT ancestor-walk (corrects §11 and plans/01 §4.0 fact 6).** Probed live on 0.144.4: for a thread cwd, `skills/list` returns only `<cwd>/.codex/skills`, `<cwd>/.agents/skills`, `~/.agents/skills`, `$CODEX_HOME/skills` (+ `.system` and plugin caches) — parent/ancestor directories are never scanned, so `$DATA_DIR/.codex/skills` was invisible and the model told QA the memory skill "isn't installed" (it then improvised file formats from the workspace README → QA finding M2). §11's "walks up ancestor directories" observation came from `~`-rooted dirs that are really the user-home roots, not a walk. **Fix:** `skills/extraRoots/set {extraRoots:[…]}` works and is server-global but per-process — AppServerClient re-applies it after every (re)spawn handshake, and boot verifies via `skills/list` that teach/memory are visible (fails loudly otherwise). Note the skills roots also mean dev-machine `~/.agents/skills` content leaks into every tutor thread's Available-skills list; harmless-but-noisy locally, absent in the deployed container.
+
+## Phase 4A addendum — how developerInstructions ACTUALLY work on 0.144.4 (verified live)
+
+Every fact below was observed on the real wire during the Phase 4 exam E2E autopsy (run log
+`e2e4-run2`, fork rollout `2026/07/17/rollout-...20-03-52-019f707f-80e7...jsonl`) and a dedicated
+probe (`thread/inject_items` fork + rotation, gpt-5.4-mini, PASS).
+
+- **`developerInstructions` reach the model ONLY at `thread/start`.** They are materialized as a
+  `role:"developer"` message in the thread transcript (rollout `response_item`,
+  `payload.type:"message"`, `role:"developer"`). That transcript message is the one and only
+  model-visible copy.
+- **`thread/resume` silently DROPS `developerInstructions`** — on threads the current child
+  already knows AND on freshly forked threads. Evidence: after our resume-with-instructions on a
+  fork, the rollout shows `thread_settings_applied` with `developer_instructions: null`, no new
+  developer message is appended, the exam template text appears NOWHERE in the rollout, and the
+  model kept acting as the parent tutor (authenticated `ui_create_exam` with the parent's
+  session_token; final message told the learner to "open a new Exam session"). `turn_context`
+  records also always show `developer_instructions: null` — even for threads whose start-time
+  instructions demonstrably work — so that field proves nothing either way.
+- **Consequence for forks:** a fork copies the parent transcript including the parent's developer
+  message, so the fork IS the parent persona until something new is appended. Fork-time and
+  resume-time instructions both being dropped means there was NO working instruction channel for
+  forks before this addendum.
+- **`thread/inject_items {threadId, items:[...]}` is the working channel.** Items are raw
+  Responses-API shapes; a developer message is
+  `{"type":"message","role":"developer","content":[{"type":"input_text","text":"..."}]}`.
+  Verified live (probe, twice within one session): (1) injection on a fork WINS over the
+  inherited parent developer message; (2) a SECOND injection supersedes the first (the
+  generate→grade rotation); (3) injected items persist in the rollout as ordinary
+  `response_item` developer messages — they survive process restarts, no re-injection needed
+  (ThreadManager still re-injects on post-restart resume; harmless, last-wins); (4) response is
+  `{}`; injecting into a thread the child hasn't loaded auto-loads it (a `thread/started`
+  notification fires — ignore it).
+- **EduAgent wiring:** ThreadManager.resume() injects the current-phase exam template (with a
+  supersession preamble naming the session_token rule) after every `thread/resume` of an exam
+  thread; resume/fork still carry `developerInstructions` for forward-compat only. Non-exam
+  threads are untouched: their instructions rode `thread/start`. ⚠️ This also means the
+  onboarding→learn instruction "rotation on next resume" (§ top of ThreadManager) has never
+  actually reached the model on 0.144.4 — revisit if onboarding→learn behavior drift is ever
+  observed (the session token is identical across that rotation, so tool auth never breaks).

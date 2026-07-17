@@ -109,9 +109,14 @@ export class GitService {
    */
   async commitAll(message: string, opts: { backdate?: Date } = {}): Promise<string> {
     // Ambient GIT_* vars (GIT_DIR, GIT_EDITOR, …) would misdirect the child
-    // git or trip simple-git's unsafe-env guard — drop them before adding ours.
+    // git or trip simple-git's unsafe-env guard — drop them before adding
+    // ours. Plain EDITOR/VISUAL trip the same guard (simple-git scans any
+    // EXPLICITLY passed env, and npx/IDE shells commonly set EDITOR — found
+    // live by the Phase 4 E2E).
     const cleanEnv = Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith('GIT_') && key !== 'EDITOR' && key !== 'VISUAL',
+      ),
     ) as Record<string, string>;
     const git = opts.backdate
       ? simpleGit(this.workspaceDir).env({

@@ -18,12 +18,14 @@ import type { Prisma, PrismaClient, Thread } from '@prisma/client';
 import {
   artifactPayloadSchema,
   assessmentPayloadSchema,
+  examQuestionsSchema,
   exercisePayloadSchema,
   isUiToolName,
   quizPayloadSchema,
   relayToolCallRequestSchema,
   uiToolArgSchemas,
   UI_TOOL_NAMES,
+  type ExamResult,
   type QuizPayload,
   type RelayToolCallResponse,
   type UiToolArgs,
@@ -31,11 +33,10 @@ import {
 } from '@eduagent/shared';
 import { constantTimeEqual } from '../api/http.js';
 import type { CodexLogger } from '../codex/index.js';
+import type { DashboardService } from '../learning/DashboardService.js';
+import { examWorkdir, parseExamConfig } from '../learning/exam-config.js';
 import type { ThreadEventSink } from '../threads/index.js';
 import type { WorkspaceManager } from '../workspace/index.js';
-
-/** Exam tools are registered (so the model sees stable tooling) but inert until Phase 4. */
-const EXAM_TOOLS: ReadonlySet<UiToolName> = new Set(['ui_create_exam', 'ui_grade_exam']);
 
 /** Artifacts can be sizeable HTML; anything past this is a runaway payload. */
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
@@ -45,7 +46,14 @@ const NOOP_LOGGER: CodexLogger = { debug() {}, info() {}, warn() {}, error() {} 
 export interface UiToolRelayDeps {
   prisma: PrismaClient;
   sink: ThreadEventSink;
-  workspaces: Pick<WorkspaceManager, 'pathFor'>;
+  workspaces: Pick<WorkspaceManager, 'pathFor' | 'readLearnerModel'>;
+  /**
+   * Readiness computer for the ui_grade_exam exact snapshot (an explicit
+   * `now` bypasses the cache, so the score reflects the mastery files the
+   * agent just updated). Optional so relay tests that never grade exams
+   * don't have to build a DashboardService.
+   */
+  dashboard?: Pick<DashboardService, 'get'>;
   logger?: CodexLogger;
 }
 
@@ -68,7 +76,8 @@ const fail = (status: number, error: string): RelayResult => ({
 export class UiToolRelay {
   private readonly prisma: PrismaClient;
   private readonly sink: ThreadEventSink;
-  private readonly workspaces: Pick<WorkspaceManager, 'pathFor'>;
+  private readonly workspaces: Pick<WorkspaceManager, 'pathFor' | 'readLearnerModel'>;
+  private readonly dashboard: Pick<DashboardService, 'get'> | null;
   private readonly log: CodexLogger;
   private readonly port: number;
   private server: HttpServer | null = null;
@@ -77,6 +86,7 @@ export class UiToolRelay {
     this.prisma = deps.prisma;
     this.sink = deps.sink;
     this.workspaces = deps.workspaces;
+    this.dashboard = deps.dashboard ?? null;
     this.log = deps.logger ?? NOOP_LOGGER;
     this.port = opts.port;
   }
@@ -189,14 +199,6 @@ export class UiToolRelay {
       );
     }
 
-    if (EXAM_TOOLS.has(tool)) {
-      return fail(
-        400,
-        `${tool} is registered but exam mode activates in a later phase of EduAgent. ` +
-          'Do not retry it — continue the session without exam tooling.',
-      );
-    }
-
     const parsed = uiToolArgSchemas[tool].safeParse(args);
     if (!parsed.success) {
       const issues = parsed.error.issues
@@ -251,9 +253,13 @@ export class UiToolRelay {
         return this.gradeExercise(args as UiToolArgs['ui_grade_exercise'], thread);
       case 'ui_grade_quiz':
         return this.gradeQuiz(args as UiToolArgs['ui_grade_quiz'], thread);
+      case 'ui_create_exam':
+        return this.createExam(args as UiToolArgs['ui_create_exam'], thread);
+      case 'ui_grade_exam':
+        return this.gradeExam(args as UiToolArgs['ui_grade_exam'], thread);
       default:
-        // EXAM_TOOLS are rejected before dispatch; this is unreachable.
-        return Promise.resolve(fail(400, `${tool} is not dispatchable yet.`));
+        // isUiToolName narrowed `tool` to the dispatch table; unreachable.
+        return Promise.resolve(fail(400, `${tool} is not dispatchable.`));
     }
   }
 
@@ -546,6 +552,290 @@ export class UiToolRelay {
         'Now discuss the results briefly in chat, then update the learner model, commit per the ' +
         'memory skill, and mirror with ui_record_assessment.',
     );
+  }
+
+  /**
+   * ui_create_exam carries no exam id (plans/03 §4): the calling thread —
+   * resolved via its session token — owns exactly one `draft` Exam row, and
+   * this fills it. Guardrails mirror the exam-generate instructions so a
+   * non-compliant generation self-corrects in the same turn.
+   */
+  private async createExam(
+    args: UiToolArgs['ui_create_exam'],
+    thread: Thread,
+  ): Promise<RelayResult> {
+    const exam = await this.prisma.exam.findFirst({
+      where: { threadId: thread.id, status: 'draft' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (exam === null) {
+      return fail(
+        409,
+        'No draft exam is awaiting questions on the thread this session_token belongs to. If ' +
+          'you are generating an exam right now, you called with the WRONG session_token ' +
+          "(most likely the tutor thread's): re-read the session_token from your MOST RECENT " +
+          'exam instructions (the latest INSTRUCTION UPDATE developer message) and call ' +
+          'ui_create_exam again with exactly that token. Otherwise do not retry this tool here.',
+      );
+    }
+    const config = parseExamConfig(exam.config);
+    if (args.track !== exam.trackSlug) {
+      return fail(
+        400,
+        `This exam was requested for track "${exam.trackSlug}", not "${args.track}". Set track ` +
+          'to exactly the requested slug and call again.',
+      );
+    }
+    if (args.duration_min !== config.durationMin) {
+      return fail(
+        400,
+        `This exam was requested as ${config.durationMin} minutes, not ${args.duration_min}. Set ` +
+          `duration_min to ${config.durationMin} and call again.`,
+      );
+    }
+
+    const questions = args.sections.flatMap((section) => section.questions);
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const question of questions) {
+      if (seen.has(question.id)) duplicates.add(question.id);
+      seen.add(question.id);
+    }
+    if (duplicates.size > 0) {
+      return fail(
+        400,
+        `Question id${duplicates.size === 1 ? '' : 's'} ${[...duplicates].join(', ')} appear more ` +
+          'than once. Ids must be unique across ALL sections — fix them and call again.',
+      );
+    }
+
+    // Exam integrity + grading precondition: hidden tests must exist on disk
+    // for every coding question BEFORE the exam can go `ready`.
+    for (const question of questions) {
+      if (question.type !== 'coding') continue;
+      const testsDir = `${examWorkdir(exam.id, question.id)}/tests`;
+      let entries: string[] = [];
+      try {
+        entries = await fs.readdir(path.join(this.workspaces.pathFor(thread.userId), testsDir));
+      } catch {
+        entries = [];
+      }
+      if (entries.length === 0) {
+        return fail(
+          400,
+          `No hidden tests found at ${testsDir} for coding question "${question.id}". Write ` +
+            'tests there first (fail on the starter, pass on your reference solution — verify by ' +
+            'running them), then call ui_create_exam again. Do NOT commit them.',
+        );
+      }
+    }
+
+    // Targeting honesty: every question concept must belong to the track's
+    // curriculum (skipped only when the track file itself is unreadable).
+    const trackError = await this.verifyExamConcepts(thread.userId, exam.trackSlug, questions);
+    if (trackError !== null) return trackError;
+
+    // The persisted payload drops session_token (schema omit) — questions
+    // carry no answer keys by construction (shared examQuestionSchema).
+    const payload = examQuestionsSchema.parse(args);
+    await this.prisma.exam.update({
+      where: { id: exam.id },
+      data: { questions: payload as Prisma.InputJsonValue, status: 'ready' },
+    });
+
+    const event = { type: 'exam.created' as const, examId: exam.id };
+    this.sink.emitToThread(thread.id, event);
+    this.sink.emitToUser(thread.userId, event);
+
+    return ok(
+      `Exam ${exam.id} is ready (${questions.length} questions) and announced to the learner — ` +
+        'they start it from the exam room when they choose. Until the grading task arrives: do ' +
+        'not commit anything under .exercises/exam-*, do not reveal questions, tests, or the ' +
+        'answer key, and do not tutor. End the turn with your short confirmation and the ' +
+        '"Targeting:" list per your instructions.',
+    );
+  }
+
+  /** Every question concept must reference the track curriculum (bare or topic-qualified). */
+  private async verifyExamConcepts(
+    userId: string,
+    trackSlug: string,
+    questions: Array<{ id: string; concepts: string[] }>,
+  ): Promise<RelayResult | null> {
+    let allowed: Set<string>;
+    try {
+      const model = await this.workspaces.readLearnerModel(userId);
+      const track = model.tracks.find((t) => t.track === trackSlug);
+      if (track === undefined) return null; // track file unreadable — skip, don't block
+      allowed = new Set(track.items.flatMap((item) => [item.concept, `${item.topic}/${item.concept}`]));
+    } catch {
+      return null;
+    }
+    const offenders = questions
+      .filter((q) => q.concepts.some((concept) => !allowed.has(concept)))
+      .map((q) => q.id);
+    if (offenders.length === 0) return null;
+    return fail(
+      400,
+      `Question${offenders.length === 1 ? '' : 's'} ${offenders.join(', ')} reference concepts ` +
+        `outside the ${trackSlug} curriculum. Every question's concepts must come from the ` +
+        "track's items (use the exact concept ids from tracks/" +
+        `${trackSlug}.yaml, optionally topic-qualified). Fix them and call again.`,
+    );
+  }
+
+  /**
+   * ui_grade_exam persists the result and computes the EXACT readiness
+   * snapshot: `before` was stored at submit, `after` is computed here from
+   * the mastery files the agent just updated (exam-grade step 3 puts file
+   * updates before this call) with the same math the dashboard uses.
+   */
+  private async gradeExam(args: UiToolArgs['ui_grade_exam'], thread: Thread): Promise<RelayResult> {
+    const exam = await this.prisma.exam.findUnique({ where: { id: args.exam_id } });
+    if (exam === null || exam.userId !== thread.userId) {
+      return fail(
+        404,
+        `No exam "${args.exam_id}" exists for this learner. Use the exact exam id from your ` +
+          'instructions and grading task.',
+      );
+    }
+    if (exam.threadId !== thread.id) {
+      return fail(
+        409,
+        `Exam ${args.exam_id} belongs to a different thread than this session_token resolves ` +
+          'to. If you are grading it right now, you called with the WRONG session_token: ' +
+          're-read the session_token from your MOST RECENT exam instructions (the latest ' +
+          'INSTRUCTION UPDATE developer message) and call ui_grade_exam again with that token.',
+      );
+    }
+    if (exam.status === 'graded') {
+      return fail(
+        409,
+        `Exam ${args.exam_id} is already graded. Do not grade twice — finish the exam record ` +
+          'and the exam(<topic>) commit if you have not.',
+      );
+    }
+    if (exam.status !== 'submitted') {
+      return fail(
+        409,
+        `Exam ${args.exam_id} has status "${exam.status}" — the learner has not submitted yet. ` +
+          'Wait for the grading task; do not grade early.',
+      );
+    }
+
+    const questions = examQuestionsSchema.parse(exam.questions);
+    const questionById = new Map(
+      questions.sections.flatMap((s) => s.questions).map((q) => [q.id, q]),
+    );
+    const unknown = args.per_question.filter((g) => !questionById.has(g.id));
+    if (unknown.length > 0) {
+      return fail(
+        400,
+        `Grade id${unknown.length === 1 ? '' : 's'} ${unknown.map((g) => g.id).join(', ')} do not ` +
+          `exist on exam ${args.exam_id}. Valid question ids: ${[...questionById.keys()].join(', ')}. ` +
+          'Fix them and call again.',
+      );
+    }
+    const gradedIds = new Set(args.per_question.map((g) => g.id));
+    const missing = [...questionById.keys()].filter((id) => !gradedIds.has(id));
+    if (missing.length > 0) {
+      return fail(
+        400,
+        `Every question needs a grade — missing: ${missing.join(', ')} (unanswered questions ` +
+          'get verdict "incorrect" with 0 points). Add them and call again.',
+      );
+    }
+    const overAwarded = args.per_question.filter(
+      (g) => g.points_awarded > (questionById.get(g.id)?.points ?? 0),
+    );
+    if (overAwarded.length > 0) {
+      return fail(
+        400,
+        `points_awarded exceeds the question's points on: ${overAwarded
+          .map((g) => `${g.id} (${g.points_awarded} > ${questionById.get(g.id)?.points})`)
+          .join(', ')}. Cap each at the question's points and call again.`,
+      );
+    }
+    const pointsSum = args.per_question.reduce((sum, g) => sum + g.points_awarded, 0);
+    if (Math.abs(pointsSum - args.total) > 0.01) {
+      return fail(
+        400,
+        `total (${args.total}) must equal the sum of points_awarded (${pointsSum}). Fix the ` +
+          'arithmetic and call again.',
+      );
+    }
+
+    const config = parseExamConfig(exam.config);
+    const round1 = (value: number): number => Math.round(value * 10) / 10;
+    const readinessBefore =
+      config.readinessBefore !== undefined ? round1(config.readinessBefore) : undefined;
+    const rawAfter = await this.currentReadiness(thread.userId, exam.trackSlug);
+    const readinessAfter = rawAfter !== null ? round1(rawAfter) : null;
+    const exact = readinessBefore !== undefined && readinessAfter !== null;
+    // Delta from the ROUNDED endpoints (round1(a−b) ≠ round1(a)−round1(b) for
+    // some draws — E2E run-4 finding: stored 15.8 vs recomputed 15.7): the
+    // persisted trio must satisfy delta = after − before exactly, because the
+    // exam record and the web recompute it from the stored rounded values.
+    const exactDelta = exact ? round1(readinessAfter - readinessBefore) : null;
+    if (exactDelta !== null && Math.abs(exactDelta - args.readiness_delta) > 1) {
+      this.log.warn(
+        { examId: exam.id, agentDelta: args.readiness_delta, exactDelta, tag: 'prompt-bug' },
+        'ui_grade_exam readiness_delta differs from the computed value — persisting the exact one',
+      );
+    }
+    const result: ExamResult = {
+      per_question: args.per_question,
+      total: args.total,
+      readiness_delta: exactDelta ?? args.readiness_delta,
+      ...(readinessBefore !== undefined ? { readiness_before: readinessBefore } : {}),
+      ...(readinessAfter !== null ? { readiness_after: readinessAfter } : {}),
+    };
+
+    await this.prisma.exam.update({
+      where: { id: exam.id },
+      data: { result: result as Prisma.InputJsonValue, status: 'graded', gradedAt: new Date() },
+    });
+    await this.prisma.activityEvent.create({
+      data: {
+        userId: thread.userId,
+        kind: 'exam_graded',
+        meta: {
+          threadId: thread.id,
+          examId: exam.id,
+          total: args.total,
+          readinessDelta: result.readiness_delta,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    const event = { type: 'exam.graded' as const, examId: exam.id };
+    this.sink.emitToThread(thread.id, event);
+    this.sink.emitToUser(thread.userId, event);
+
+    const snapshot = exact
+      ? `EXACT readiness for ${exam.trackSlug}: ${readinessBefore.toFixed(1)} → ` +
+        `${readinessAfter.toFixed(1)} (delta ${(exactDelta ?? 0) >= 0 ? '+' : ''}${(exactDelta ?? 0).toFixed(1)}). ` +
+        'Use these exact numbers — not your estimate — in the exam record.'
+      : 'Readiness could not be computed server-side; use your estimated delta in the exam record.';
+    return ok(
+      `Result recorded for exam ${exam.id} (${args.total} points). ${snapshot} Now: write ` +
+        `exams/<date>-${exam.trackSlug}-mock.md with the readiness snapshot, then land ONE ` +
+        `exam(<topic>) commit that force-adds the exam workdirs ` +
+        `(git add -A && git add -f .exercises/exam-${exam.id}-*), and mirror the mastery ` +
+        'changes with ui_record_assessment.',
+    );
+  }
+
+  /** Track readiness right now, from the files on disk (cache bypassed). */
+  private async currentReadiness(userId: string, trackSlug: string): Promise<number | null> {
+    if (this.dashboard === null) return null;
+    try {
+      const data = await this.dashboard.get(userId, { now: new Date() });
+      return data.readiness.find((entry) => entry.track === trackSlug)?.score ?? null;
+    } catch (err) {
+      this.log.warn({ err, userId, trackSlug }, 'post-exam readiness computation failed');
+      return null;
+    }
   }
 }
 
