@@ -11,4 +11,11 @@ export function estimateTokens(text: string): number {
 export const STATE_DIGEST_TOKEN_BUDGET = 600;
 
 /** Budget for thread-level developerInstructions — skills carry the bulk, these stay lean. */
-export const MODE_INSTRUCTIONS_TOKEN_BUDGET = 700;
+export const MODE_INSTRUCTIONS_TOKEN_BUDGET = 800;
+
+/**
+ * Onboarding runs before the learner model exists and its first write MUST
+ * zod-validate (Phase 1 QA finding M2), so the exact file templates ride in
+ * the instructions themselves — a deliberate exception to the lean budget.
+ */
+export const ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET = 1_700;

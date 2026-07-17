@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
 import { Check, GitCommitHorizontal, Loader2 } from 'lucide-react';
 import type { MemoryCommit } from '@eduagent/shared';
+import { useMe } from '@/hooks/use-me';
 import { useTurnStream, type TurnStream } from '@/hooks/use-turn-stream';
 import { useReplayTurnStream } from '@/hooks/use-replay-turn-stream';
 import { onboardingGreetingScript, onboardingReplyScripts } from '@/lib/fixtures/turn-preview';
@@ -224,12 +225,22 @@ function OnboardingLive({ threadId }: { threadId: string }) {
 }
 
 export function OnboardingWizard({ previewMode }: { previewMode: boolean }) {
+  const router = useRouter();
+  const me = useMe();
   const [threadId, setThreadId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
 
+  // Already-onboarded learners revisiting /app/onboarding go home (QA m7) —
+  // unless they're mid-flow here (the finale keeps its "memory born" moment
+  // even though the profile commit just flipped the flag).
+  const alreadyOnboarded = !previewMode && me.data?.onboarded === true;
   useEffect(() => {
-    if (previewMode) return;
+    if (alreadyOnboarded && threadId === null) router.replace('/app');
+  }, [alreadyOnboarded, threadId, router]);
+
+  useEffect(() => {
+    if (previewMode || alreadyOnboarded || me.isPending) return;
     let cancelled = false;
     setError(null);
     // The interview runs on a learn-mode thread; the server drives the
@@ -244,7 +255,7 @@ export function OnboardingWizard({ previewMode }: { previewMode: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [previewMode, attempt]);
+  }, [previewMode, attempt, alreadyOnboarded, me.isPending]);
 
   if (previewMode) return <OnboardingPreview />;
   if (threadId) return <OnboardingLive threadId={threadId} />;

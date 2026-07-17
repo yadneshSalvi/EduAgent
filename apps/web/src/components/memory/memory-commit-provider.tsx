@@ -104,10 +104,14 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
     <MemoryCommitContext.Provider value={value}>
       {children}
 
-      {/* Toast viewport — bottom-right (plans/04 §1). */}
+      {/* Toast viewport — bottom-right (plans/04 §1). aria-live on the
+          container so newly appended toasts announce (m5); the ticking delta
+          numbers inside are aria-hidden with static meter labels, so each
+          commit announces once, not per animation frame. */}
       <div
         role="region"
         aria-label="Memory commits"
+        aria-live="polite"
         className="pointer-events-none fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3"
       >
         <AnimatePresence initial={false}>

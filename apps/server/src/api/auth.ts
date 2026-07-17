@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { User } from '@prisma/client';
 import type { FastifyPluginAsync } from 'fastify';
-import { demoLoginRequestSchema, localLoginRequestSchema, type MeResponse } from '@eduagent/shared';
+import {
+  demoLoginRequestSchema,
+  localLoginRequestSchema,
+  type LocalUsersResponse,
+  type MeResponse,
+} from '@eduagent/shared';
 import { LOCAL_SESSION_COOKIE } from '../auth/index.js';
 import { workspacePathFor } from '../config.js';
 import { constantTimeEqual, sendError } from './http.js';
@@ -57,6 +62,24 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       maxAge: 60 * 60 * 24 * 30,
     });
     return toMeResponse(user, await isOnboarded(user.id));
+  });
+
+  /** Existing local profiles so the picker offers one-click sign-in (QA m6). */
+  app.get('/auth/local-users', async (_req, reply) => {
+    if (config.authMode !== 'local') {
+      return sendError(
+        reply,
+        404,
+        'not_found',
+        'GET /auth/local-users is only available when AUTH_MODE=local.',
+      );
+    }
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'asc' },
+      select: { handle: true, displayName: true },
+    });
+    const response: LocalUsersResponse = { users };
+    return response;
   });
 
   app.post('/auth/demo-login', async (req, reply) => {

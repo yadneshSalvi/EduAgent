@@ -1,10 +1,19 @@
+import { load as yamlLoad } from 'js-yaml';
+import {
+  masteryFileSchema,
+  profileFrontmatterSchema,
+  srsQueueFileSchema,
+  trackFileSchema,
+} from '@eduagent/shared';
 import { describe, expect, it } from 'vitest';
+import { ONBOARDING_FILE_TEMPLATES } from '../src/prompts/modes/onboarding.js';
 import {
   buildContextEnvelope,
   buildLearnInstructions,
   buildOnboardingInstructions,
   estimateTokens,
   MODE_INSTRUCTIONS_TOKEN_BUDGET,
+  ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET,
   readSkillSource,
   SKILL_NAMES,
 } from '../src/prompts/index.js';
@@ -32,12 +41,24 @@ describe('mode templates (plans/03 §6.3–6.4)', () => {
 
   it('learn instructions include the greeting protocol only at session start', () => {
     const base = { sessionToken: TOKEN, topicSlug: 'sql' };
-    expect(buildLearnInstructions({ ...base, isSessionStart: true })).toContain(
-      'First turn of this sitting',
-    );
+    const atStart = buildLearnInstructions({ ...base, isSessionStart: true });
+    expect(atStart).toContain('First message of this sitting');
+    // QA finding M1: recall, never a re-interview.
+    expect(atStart).toContain('PERSONAL recall');
+    expect(atStart).toContain('Never re-ask');
     expect(buildLearnInstructions({ ...base, isSessionStart: false })).not.toContain(
-      'First turn of this sitting',
+      'First message of this sitting',
     );
+  });
+
+  it('mode instructions carry the learner-facing voice rules (QA finding M3)', () => {
+    for (const text of [
+      buildLearnInstructions({ sessionToken: TOKEN, topicSlug: 'sql' }),
+      buildOnboardingInstructions({ sessionToken: TOKEN }),
+    ]) {
+      expect(text).toContain('Learner-facing voice');
+      expect(text).toContain('Memory bookkeeping is SILENT');
+    }
   });
 
   it('onboarding instructions carry the token, interview flow, and the exact init commit', () => {
@@ -48,7 +69,26 @@ describe('mode templates (plans/03 §6.3–6.4)', () => {
     expect(text).toContain('ui_push_quiz');
     expect(text).toContain('confidence: low');
     expect(text).toContain('profile: initialize learner model');
-    expect(estimateTokens(text)).toBeLessThanOrEqual(MODE_INSTRUCTIONS_TOKEN_BUDGET);
+    // QA finding p9c: the interview matches the 4 wizard step chips.
+    expect(text).toContain('AT MOST 4');
+    expect(estimateTokens(text)).toBeLessThanOrEqual(ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET);
+  });
+
+  it('onboarding file templates zod-validate against the shared schemas (QA finding M2)', () => {
+    // The instructions must carry the templates verbatim…
+    const text = buildOnboardingInstructions({ sessionToken: TOKEN });
+    for (const snippet of Object.values(ONBOARDING_FILE_TEMPLATES)) {
+      expect(text).toContain(snippet);
+    }
+    // …and the templates themselves must parse under the real schemas.
+    expect(() =>
+      profileFrontmatterSchema.parse(yamlLoad(ONBOARDING_FILE_TEMPLATES.profileFrontmatter)),
+    ).not.toThrow();
+    expect(() => trackFileSchema.parse(yamlLoad(ONBOARDING_FILE_TEMPLATES.track))).not.toThrow();
+    expect(() =>
+      masteryFileSchema.parse(yamlLoad(ONBOARDING_FILE_TEMPLATES.mastery)),
+    ).not.toThrow();
+    expect(() => srsQueueFileSchema.parse(yamlLoad(ONBOARDING_FILE_TEMPLATES.srs))).not.toThrow();
   });
 });
 

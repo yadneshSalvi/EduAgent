@@ -44,20 +44,25 @@ workspace/
 
 ## Format guide
 
-- \`profile.md\` — YAML frontmatter (name, goal, tracks, preferences, timezone)
-  followed by free prose about how you learn best.
-- \`topics/<topic>/mastery.yaml\` — one entry per concept: \`mastery\` (0–1),
-  \`confidence\` (quality of evidence), \`last_assessed\`, \`review_count\`,
-  \`prereqs\`, and an \`evidence\` log justifying every score change. Concepts are
-  never deleted, only annotated.
+- \`profile.md\` — YAML frontmatter (\`name\`, \`goal\`, \`tracks\`,
+  \`preferences\` with only \`session_length\`: short|standard|deep,
+  \`style\`: socratic|direct, \`humor\`; \`timezone\`) followed by free prose
+  about how you learn best.
+- \`topics/<topic>/mastery.yaml\` — \`topic\`, \`display_name\`, \`updated\`
+  (ISO datetime), and \`concepts\`: a list of entries with \`id\`, \`name\`,
+  \`mastery\` (0–1), \`confidence\` (low|medium|high), \`last_assessed\`,
+  \`review_count\`, \`prereqs\`, and an \`evidence\` list (\`date\` + \`note\`)
+  justifying every score change. Concepts are never deleted, only annotated.
 - \`topics/<topic>/misconceptions.md\` — \`## [OPEN] …\` / \`## [RESOLVED <date>] …\`
   entries with evidence and a remediation plan.
-- \`tracks/<track>.yaml\` — the ordered curriculum for a goal, with per-concept
-  weights that drive your readiness score.
-- \`srs/queue.yaml\` — SM-2-style spaced-repetition items (\`due\`,
-  \`interval_days\`, \`ease\`, \`lapses\`).
-- \`sessions/<date>-<slug>.md\` — frontmatter (date, mode, topics,
-  concepts touched) + a short narrative + what to do next time.
+- \`tracks/<track>.yaml\` — \`track\`, \`display_name\`, optional
+  \`target_date\`, and \`items\`: the ordered curriculum (\`concept\`,
+  \`topic\`, \`weight\`) whose weights drive your readiness score.
+- \`srs/queue.yaml\` — \`items\` of SM-2-style spaced repetition: \`concept\`,
+  \`topic\`, \`due\`, \`interval_days\`, \`ease\`, \`lapses\`.
+- \`sessions/<date>-<slug>.md\` — frontmatter (\`date\`, \`mode\`, \`topics\`,
+  \`duration_estimate\`, \`concepts_touched\`, \`next_time\`) + a short
+  narrative of the sitting.
 
 Commit messages follow \`<type>(<topic>): <headline>\` where type is one of
 learn, review, exam, misconception, profile, seed, system — mastery changes

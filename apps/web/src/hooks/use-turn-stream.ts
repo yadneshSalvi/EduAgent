@@ -34,7 +34,15 @@ export interface ActivityChip {
 }
 
 export type TurnStatus = 'idle' | 'awaiting' | 'streaming';
-export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'unauthenticated';
+export type ConnectionStatus =
+  | 'connecting'
+  | 'open'
+  | 'reconnecting'
+  | 'unauthenticated'
+  /** The thread doesn't exist or isn't yours (WS 4403 / items 404) — terminal. */
+  | 'not-found'
+  /** Reconnect attempts exhausted — terminal until the user retries. */
+  | 'failed';
 export type HistoryStatus = 'loading' | 'ready' | 'error';
 
 export interface TurnStreamState {
@@ -294,6 +302,8 @@ export function parseWsFrame(raw: unknown): WsEvent | null {
 
 const BACKOFF_BASE_MS = 500;
 const BACKOFF_CAP_MS = 15_000;
+/** After this many consecutive failed connects, stop and show the error state (QA finding p9b). */
+const MAX_RECONNECT_ATTEMPTS = 6;
 
 export interface UseTurnStreamOptions {
   /** Fired for every memory.commit on this thread socket (toast surfacing). */
@@ -324,6 +334,12 @@ export function useTurnStream(threadId: string, options?: UseTurnStreamOptions):
         dispatch({ type: 'history', items: messages });
       })
       .catch((err: unknown) => {
+        // A real-shaped id for a thread that isn't yours: terminal not-found,
+        // never a retry loop (QA finding p9b).
+        if (err instanceof ApiError && err.status === 404) {
+          dispatch({ type: 'connection', status: 'not-found' });
+          return;
+        }
         const message =
           err instanceof ApiError || err instanceof Error
             ? err.message
@@ -367,7 +383,17 @@ export function useTurnStream(threadId: string, options?: UseTurnStreamOptions):
           dispatch({ type: 'connection', status: 'unauthenticated' });
           return;
         }
+        if (closeEvent.code === 4403 || closeEvent.code === 4400) {
+          // Not your thread / bad request — terminal, never a reconnect loop
+          // (QA finding p9b: foreign-but-real-shaped ids spun forever).
+          dispatch({ type: 'connection', status: 'not-found' });
+          return;
+        }
         attempt++;
+        if (attempt > MAX_RECONNECT_ATTEMPTS) {
+          dispatch({ type: 'connection', status: 'failed' });
+          return;
+        }
         const backoff = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_CAP_MS);
         const jittered = backoff * (0.75 + Math.random() * 0.5);
         dispatch({ type: 'connection', status: 'reconnecting' });

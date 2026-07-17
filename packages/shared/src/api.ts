@@ -42,6 +42,17 @@ export const localLoginRequestSchema = z.object({
 });
 export type LocalLoginRequest = z.infer<typeof localLoginRequestSchema>;
 
+/** GET /auth/local-users — AUTH_MODE=local only: existing profiles for the picker. */
+export const localUsersResponseSchema = z.object({
+  users: z.array(
+    z.object({
+      handle: z.string().min(1),
+      displayName: z.string().min(1),
+    }),
+  ),
+});
+export type LocalUsersResponse = z.infer<typeof localUsersResponseSchema>;
+
 /** GET /auth/me — current session resolved to the app profile. */
 export const meResponseSchema = z.object({
   id: z.string().min(1),

@@ -11,6 +11,9 @@ type Appearance = NextClerkProviderProps['appearance'];
  */
 export const clerkAppearance: Appearance = {
   theme: dark,
+  // The bot-protection widget (Cloudflare Turnstile) doesn't inherit the card
+  // theme — without this it renders light-on-dark inside the sign-in card.
+  captcha: { theme: 'dark' },
   variables: {
     colorPrimary: '#7c6aef',
     colorPrimaryForeground: '#ffffff',

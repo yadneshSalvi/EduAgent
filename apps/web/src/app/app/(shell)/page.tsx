@@ -15,8 +15,8 @@ export default function DashboardPage() {
       <div className="flex flex-1 items-center justify-center p-8">
         <EmptyState
           icon={LayoutDashboard}
-          title="Your memory starts empty."
-          description="Every session fills this in: a mastery heatmap, forgetting curves, readiness per track, and a live feed of commits to your memory."
+          title="Your dashboard is on its way."
+          description="Every session feeds this view: a mastery heatmap, forgetting curves, readiness per track, and a live feed of commits to your memory."
           example="learn(sql): inner joins clicked — mastery 0.40 → 0.72"
           cta={{ label: 'Start learning', href: '/app/learn' }}
         />

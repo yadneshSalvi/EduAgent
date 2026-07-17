@@ -1,18 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Plus, UserRound } from 'lucide-react';
-import { localLoginRequestSchema } from '@eduagent/shared';
+import { localLoginRequestSchema, type LocalUsersResponse } from '@eduagent/shared';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ApiConnectionError, ApiError, localLogin } from '@/lib/api';
+import { ApiConnectionError, ApiError, listLocalUsers, localLogin } from '@/lib/api';
 
 /**
- * AUTH_MODE=local sign-in (plans/04 §1): create-or-login by handle against
- * POST /auth/local-login (signed cookie session from the agent host), so a
- * judge runs everything with zero accounts.
+ * AUTH_MODE=local sign-in (plans/04 §1): existing profiles from
+ * GET /auth/local-users as one-click sign-ins (QA finding m6), plus
+ * create-or-login by handle against POST /auth/local-login (signed cookie
+ * session from the agent host), so a judge runs everything with zero accounts.
  */
 
 /** Only same-origin paths — never bounce the login through a foreign URL. */
@@ -28,6 +29,19 @@ export function LocalProfilePicker() {
   const [error, setError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [newHandle, setNewHandle] = useState('');
+
+  // /login renders outside the /app providers (no query client) — plain fetch.
+  // Errors (e.g. clerk mode's 404) just leave the list empty; login still works.
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [users, setUsers] = useState<LocalUsersResponse['users']>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    listLocalUsers(controller.signal)
+      .then((response) => setUsers(response.users))
+      .catch(() => {})
+      .finally(() => setUsersLoaded(true));
+    return () => controller.abort();
+  }, []);
 
   const signIn = async (handle: string) => {
     const parsed = localLoginRequestSchema.safeParse({ handle });
@@ -65,49 +79,65 @@ export function LocalProfilePicker() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Button
-          variant="outline"
-          className="h-12 justify-start gap-3"
-          disabled={busyHandle !== null}
-          onClick={() => void signIn('alex')}
-        >
-          <span className="flex size-8 items-center justify-center rounded-full bg-accent-soft text-primary">
-            {busyHandle === 'alex' ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <UserRound className="size-4" aria-hidden />
-            )}
-          </span>
-          <span className="flex flex-col items-start">
-            <span className="text-body-sm font-medium">Alex</span>
-            <span className="text-caption text-muted-foreground">demo learner</span>
-          </span>
-        </Button>
+        {!usersLoaded ? (
+          <div className="flex items-center gap-2 px-1 py-3 font-mono text-caption text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+            looking for learners on this machine…
+          </div>
+        ) : (
+          users.map((user) => (
+            <Button
+              key={user.handle}
+              variant="outline"
+              className="h-12 justify-start gap-3"
+              disabled={busyHandle !== null}
+              onClick={() => void signIn(user.handle)}
+            >
+              <span className="flex size-8 items-center justify-center rounded-full bg-accent-soft text-primary">
+                {busyHandle === user.handle ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  <UserRound className="size-4" aria-hidden />
+                )}
+              </span>
+              <span className="flex flex-col items-start">
+                <span className="text-body-sm font-medium">{user.displayName}</span>
+                <span className="font-mono text-caption text-muted-foreground">{user.handle}</span>
+              </span>
+            </Button>
+          ))
+        )}
 
         {showNew ? (
           <form
-            className="flex gap-2"
+            className="flex flex-col gap-2"
             onSubmit={(event) => {
               event.preventDefault();
               void signIn(newHandle.trim());
             }}
           >
-            <Input
-              autoFocus
-              value={newHandle}
-              onChange={(event) => setNewHandle(event.target.value.toLowerCase())}
-              placeholder="your-handle"
-              aria-label="New learner handle"
-              className="font-mono"
-              disabled={busyHandle !== null}
-            />
-            <Button type="submit" disabled={busyHandle !== null || newHandle.trim() === ''}>
-              {busyHandle !== null && busyHandle === newHandle.trim() ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-              ) : (
-                'Start'
-              )}
-            </Button>
+            <div className="flex gap-2">
+              <Input
+                autoFocus
+                value={newHandle}
+                onChange={(event) => setNewHandle(event.target.value.toLowerCase())}
+                placeholder="your-handle"
+                aria-label="New learner handle"
+                className="font-mono"
+                disabled={busyHandle !== null}
+              />
+              <Button type="submit" disabled={busyHandle !== null || newHandle.trim() === ''}>
+                {busyHandle !== null && busyHandle === newHandle.trim() ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden />
+                ) : (
+                  'Start'
+                )}
+              </Button>
+            </div>
+            <p className="text-caption text-muted-foreground">
+              A new handle starts a fresh learner with an empty memory — pick your existing
+              profile above to continue where you left off.
+            </p>
           </form>
         ) : (
           <Button

@@ -54,6 +54,9 @@ export function MessageList({ state, onRetryTurn, emptyHint }: MessageListProps)
     state.streamingText === '' &&
     state.history === 'ready';
 
+  const lastCompletedAgentText =
+    [...state.items].reverse().find((item) => item.role === 'agent')?.text ?? '';
+
   return (
     <div
       ref={containerRef}
@@ -78,13 +81,17 @@ export function MessageList({ state, onRetryTurn, emptyHint }: MessageListProps)
         <ActivityChips chips={state.activityChips} />
         <ReasoningPreview text={state.reasoningPreview} />
 
+        {/* Live region announces the thinking state and each COMPLETED reply
+            — never the token stream, which would spam screen readers (m5).
+            The streamed text renders outside it and is announced on landing
+            in the items list via the sr-only mirror below. */}
         <div aria-live="polite">
-          {state.streamingText !== '' ? (
-            <StreamingMessage text={state.streamingText} />
-          ) : state.turnStatus === 'awaiting' ? (
+          {state.streamingText === '' && state.turnStatus === 'awaiting' ? (
             <ThinkingIndicator />
           ) : null}
+          <span className="sr-only">{lastCompletedAgentText}</span>
         </div>
+        {state.streamingText !== '' ? <StreamingMessage text={state.streamingText} /> : null}
 
         {state.error ? (
           <div

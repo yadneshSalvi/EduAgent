@@ -84,6 +84,7 @@ export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
   private readonly defaultSummary: v2.TurnStartParams['summary'];
   private readonly clientInfo: ClientInfo;
   private readonly spawnArgs: string[];
+  private readonly skillsExtraRoots: string[];
   private readonly approveElicitation: ElicitationApprover;
   private readonly onRestarted?: () => void | Promise<void>;
   private readonly log: CodexLogger;
@@ -113,6 +114,7 @@ export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
     this.defaultSummary = options.defaultSummary ?? 'detailed';
     this.clientInfo = options.clientInfo ?? DEFAULT_CLIENT_INFO;
     this.spawnArgs = ['app-server', ...renderMcpConfigArgs(options.mcpServers)];
+    this.skillsExtraRoots = options.skillsExtraRoots ?? [];
     this.approveElicitation = options.approveElicitation ?? defaultElicitationApprover;
     this.onRestarted = options.onRestarted;
     this.log = options.logger ?? NOOP_LOGGER;
@@ -394,6 +396,20 @@ export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
     this.state = 'running';
     this.everStarted = true;
     this.log.info(init, 'codex app-server handshake complete');
+
+    // Server-global skill roots, re-applied on every (re)spawn. codex 0.144.4
+    // does NOT ancestor-walk from thread cwds, so without this the skills at
+    // $DATA_DIR/.codex/skills never reach the model (QA finding M2). A failure
+    // here is logged, not thrown: boot verifies visibility via skills/list and
+    // fails loudly there; a restart-path failure degrades prompts, not turns.
+    if (this.skillsExtraRoots.length > 0) {
+      try {
+        await this.sendRequest('skills/extraRoots/set', { extraRoots: this.skillsExtraRoots });
+        this.log.info({ roots: this.skillsExtraRoots }, 'codex skill roots registered');
+      } catch (err) {
+        this.log.error({ err, roots: this.skillsExtraRoots }, 'skills/extraRoots/set failed');
+      }
+    }
   }
 
   private handleChildDeath(

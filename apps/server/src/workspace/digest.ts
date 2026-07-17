@@ -34,6 +34,12 @@ export function formatStateDigest(model: LearnerModel, opts: DigestOptions = {})
       .map(([key, value]) => `${key}=${value}`)
       .join(' · ');
     if (prefs) lines.push(`Preferences: ${prefs} · timezone: ${p.timezone}`);
+  } else if (model.needsRepair.includes('profile.md')) {
+    // Unrecoverable profile ≠ new learner: without this distinction the agent
+    // re-interviews someone it already knows (Phase 1 QA finding M1).
+    lines.push(
+      'Profile: profile.md exists but is invalid and unrecoverable — repair it; do NOT re-interview the learner.',
+    );
   } else {
     lines.push('No profile yet — this learner has not completed onboarding.');
   }
@@ -102,6 +108,12 @@ export function formatStateDigest(model: LearnerModel, opts: DigestOptions = {})
     const topics = fm.topics.length > 0 ? `, ${fm.topics.join('+')}` : '';
     lines.push(
       `Last session ${fm.date} (${fm.mode}${topics})${fm.next_time ? ` — next time: ${clip(fm.next_time, 160)}` : ''}`,
+    );
+  } else if (model.profile) {
+    // A missing session log after onboarding must never read as "no learner
+    // state" — everything above IS the state (Phase 1 QA finding M1).
+    lines.push(
+      'No session log yet: onboarding is done, this sitting is their first real lesson.',
     );
   }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { PanelRight, Square } from 'lucide-react';
 import type { TurnStream } from '@/hooks/use-turn-stream';
 import { Badge } from '@/components/ui/badge';
@@ -31,7 +32,11 @@ function ConnectionDot({ connection }: { connection: TurnStream['state']['connec
       ? 'connected'
       : connection === 'unauthenticated'
         ? 'signed out'
-        : 'reconnecting';
+        : connection === 'not-found'
+          ? 'not found'
+          : connection === 'failed'
+            ? 'offline'
+            : 'reconnecting';
   return (
     <span className="hidden items-center gap-1.5 font-mono text-caption text-muted-foreground md:flex">
       <span
@@ -40,7 +45,10 @@ function ConnectionDot({ connection }: { connection: TurnStream['state']['connec
           'size-1.5 rounded-full',
           connection === 'open' && 'bg-success',
           (connection === 'connecting' || connection === 'reconnecting') && 'animate-pulse bg-warn',
-          connection === 'unauthenticated' && 'bg-danger',
+          (connection === 'unauthenticated' ||
+            connection === 'not-found' ||
+            connection === 'failed') &&
+            'bg-danger',
         )}
       />
       {label}
@@ -91,7 +99,27 @@ export function TutorRoomView({
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          {state.history === 'error' ? (
+          {state.connection === 'not-found' ? (
+            <div className="flex flex-1 items-center justify-center p-8">
+              <ErrorState
+                title="This session doesn't exist"
+                description="There's no learning session at this address — it may belong to another learner or the link is stale. Your own memory and sessions are untouched."
+                secondary={
+                  <Button asChild variant="outline">
+                    <Link href="/app/learn">Back to your sessions</Link>
+                  </Button>
+                }
+              />
+            </div>
+          ) : state.connection === 'failed' ? (
+            <div className="flex flex-1 items-center justify-center p-8">
+              <ErrorState
+                title="Can't reach the tutor"
+                description="The live connection kept failing. Your memory is intact — reload to try again."
+                onRetry={() => window.location.reload()}
+              />
+            </div>
+          ) : state.history === 'error' ? (
             <div className="flex flex-1 items-center justify-center p-8">
               <ErrorState
                 title="The tutor room can't load yet"
@@ -103,12 +131,14 @@ export function TutorRoomView({
           ) : (
             <MessageList state={state} onRetryTurn={retryTurn} emptyHint={emptyHint} />
           )}
-          <ChatInput
-            onSend={send}
-            onInterrupt={onInterrupt}
-            turnInFlight={turnInFlight}
-            connection={state.connection}
-          />
+          {state.connection === 'not-found' || state.connection === 'failed' ? null : (
+            <ChatInput
+              onSend={send}
+              onInterrupt={onInterrupt}
+              turnInFlight={turnInFlight}
+              connection={state.connection}
+            />
+          )}
         </div>
 
         {/* Workbench (Exercise · Quiz · Artifact) lands in Phase 2 — collapsed rail stub. */}

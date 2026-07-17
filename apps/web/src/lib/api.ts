@@ -5,6 +5,7 @@ import {
   createThreadResponseSchema,
   listThreadsResponseSchema,
   localLoginRequestSchema,
+  localUsersResponseSchema,
   meResponseSchema,
   okResponseSchema,
   threadItemsResponseSchema,
@@ -12,6 +13,7 @@ import {
   type CreateThreadResponse,
   type ListThreadsResponse,
   type LocalLoginRequest,
+  type LocalUsersResponse,
   type MeResponse,
   type OkResponse,
   type ThreadItemsResponse,
@@ -20,12 +22,23 @@ import {
 
 /**
  * Typed fetch wrapper for the agent host (plans/03 §7). Base URL comes from
- * NEXT_PUBLIC_SERVER_URL (default http://localhost:8787); every call is
- * credentialed (the AUTH_MODE=local session cookie / Clerk JWT ride along) and
- * every response is zod-parsed against the shared contract schemas.
+ * NEXT_PUBLIC_SERVER_URL when set; otherwise it is derived at RUNTIME from
+ * the page's own hostname + the default server port. Deriving (rather than
+ * hardcoding localhost) keeps the session cookie same-site: a page opened on
+ * 127.0.0.1 talking to localhost:8787 is cross-site, so the browser drops
+ * the SameSite=Lax cookie and every call 401s (QA finding m4). Every call is
+ * credentialed (the AUTH_MODE=local session cookie / Clerk JWT ride along)
+ * and every response is zod-parsed against the shared contract schemas.
  */
+const DEFAULT_SERVER_PORT = 8787;
+
 export function serverBaseUrl(): string {
-  return (process.env.NEXT_PUBLIC_SERVER_URL ?? 'http://localhost:8787').replace(/\/+$/, '');
+  const configured = process.env.NEXT_PUBLIC_SERVER_URL;
+  if (configured) return configured.replace(/\/+$/, '');
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:${DEFAULT_SERVER_PORT}`;
+  }
+  return `http://localhost:${DEFAULT_SERVER_PORT}`;
 }
 
 /** ws(s):// equivalent of the server base, for the WS gateway. */
@@ -72,21 +85,43 @@ interface ApiFetchOptions<T> {
   signal?: AbortSignal;
 }
 
+/**
+ * Scoped post-login 401 retry (QA finding m4): the calls fired right after a
+ * successful login (useMe refetch, the onboarding wizard's POST /api/threads)
+ * occasionally raced the freshly set session cookie. Inside this window a 401
+ * gets ONE delayed retry; outside it, 401s fail immediately as before.
+ */
+const LOGIN_RETRY_WINDOW_MS = 10_000;
+const LOGIN_RETRY_DELAY_MS = 300;
+let lastLoginAt = 0;
+
+/** Called by login flows after their response settles. */
+export function markSessionEstablished(): void {
+  lastLoginAt = Date.now();
+}
+
 export async function apiFetch<T>(path: string, options: ApiFetchOptions<T>): Promise<T> {
   const { method = 'GET', body, schema, signal } = options;
-  let res: Response;
-  try {
-    res = await fetch(`${serverBaseUrl()}${path}`, {
-      method,
-      credentials: 'include',
-      signal,
-      ...(body !== undefined
-        ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
-        : {}),
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    throw new ApiConnectionError(serverBaseUrl());
+  const doFetch = async (): Promise<Response> => {
+    try {
+      return await fetch(`${serverBaseUrl()}${path}`, {
+        method,
+        credentials: 'include',
+        signal,
+        ...(body !== undefined
+          ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+          : {}),
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      throw new ApiConnectionError(serverBaseUrl());
+    }
+  };
+
+  let res = await doFetch();
+  if (res.status === 401 && Date.now() - lastLoginAt < LOGIN_RETRY_WINDOW_MS) {
+    await new Promise((resolve) => setTimeout(resolve, LOGIN_RETRY_DELAY_MS));
+    res = await doFetch();
   }
 
   if (!res.ok) {
@@ -133,12 +168,19 @@ export function getMe(signal?: AbortSignal): Promise<MeResponse> {
   return apiFetch('/auth/me', { schema: meResponseSchema, signal });
 }
 
-export function localLogin(request: LocalLoginRequest): Promise<MeResponse> {
-  return apiFetch('/auth/local-login', {
+export async function localLogin(request: LocalLoginRequest): Promise<MeResponse> {
+  const me = await apiFetch('/auth/local-login', {
     method: 'POST',
     body: localLoginRequestSchema.parse(request),
     schema: meResponseSchema,
   });
+  markSessionEstablished();
+  return me;
+}
+
+/** AUTH_MODE=local only — existing profiles for the login picker (404 in clerk mode). */
+export function listLocalUsers(signal?: AbortSignal): Promise<LocalUsersResponse> {
+  return apiFetch('/auth/local-users', { schema: localUsersResponseSchema, signal });
 }
 
 export function listThreads(mode?: ThreadMode, signal?: AbortSignal): Promise<ListThreadsResponse> {

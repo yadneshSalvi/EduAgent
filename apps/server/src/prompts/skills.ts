@@ -29,9 +29,14 @@ export interface SkillInstallResult {
   action: 'installed' | 'updated' | 'unchanged';
 }
 
+/** The skills root under the data dir — registered with codex via `skills/extraRoots/set`. */
+export function installedSkillsRoot(dataDir: string): string {
+  return path.join(dataDir, '.codex', 'skills');
+}
+
 /** Where a skill lands under the data dir. */
 export function installedSkillPath(dataDir: string, name: SkillName): string {
-  return path.join(dataDir, '.codex', 'skills', name, 'SKILL.md');
+  return path.join(installedSkillsRoot(dataDir), name, 'SKILL.md');
 }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');

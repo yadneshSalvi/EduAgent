@@ -29,9 +29,21 @@ function DeltaTickChip({
 }) {
   const current = useTickedNumber(to, { from, durationMs: 800, delayMs });
   return (
-    <span className="inline-flex items-center gap-1 rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-caption">
-      <span className="text-muted-foreground">{concept}</span>
-      <span className="numeric">
+    // Meter semantics carry the accessible value; the ticking spans are
+    // aria-hidden so the surrounding live region announces the commit once,
+    // not every animation frame (m5) — and innerText stays single-copy (p9a).
+    <span
+      role="meter"
+      aria-valuemin={0}
+      aria-valuemax={1}
+      aria-valuenow={to}
+      aria-label={`${concept} mastery ${formatMastery(from)} to ${formatMastery(to)}`}
+      className="inline-flex items-center gap-1 rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-caption"
+    >
+      <span aria-hidden className="text-muted-foreground">
+        {concept}
+      </span>
+      <span aria-hidden className="numeric">
         <span className="text-muted-foreground">{formatMastery(from)}→</span>
         <span style={{ color: masteryColor(current) }}>{formatMastery(current)}</span>
       </span>
@@ -71,7 +83,8 @@ export function CommitToast({ commit, onOpen, onDismiss }: CommitToastProps) {
   return (
     <motion.div
       layout={!reducedMotion}
-      role="status"
+      // No role="status" here — the viewport container is the live region
+      // (m5); doubling live semantics makes some screen readers announce twice.
       // Causality (05 §5): slides in from the chat that caused it (the left).
       initial={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -20, y: 8 }}
       animate={{ opacity: 1, x: 0, y: 0 }}

@@ -39,6 +39,10 @@ export interface AppServerMethods {
   'turn/interrupt': { params: v2.TurnInterruptParams; result: v2.TurnInterruptResponse };
   'model/list': { params: v2.ModelListParams; result: v2.ModelListResponse };
   'skills/list': { params: v2.SkillsListParams; result: v2.SkillsListResponse };
+  'skills/extraRoots/set': {
+    params: v2.SkillsExtraRootsSetParams;
+    result: v2.SkillsExtraRootsSetResponse;
+  };
   'account/read': { params: v2.GetAccountParams; result: v2.GetAccountResponse };
   'mcpServerStatus/list': {
     params: v2.ListMcpServerStatusParams;
@@ -173,6 +177,13 @@ export interface AppServerClientOptions {
   mcpServers?: Record<string, McpServerSpec>;
   /** Decides MCP tool-call elicitations; default accepts `ui_*` tool calls only. */
   approveElicitation?: ElicitationApprover;
+  /**
+   * Skill roots registered via `skills/extraRoots/set` after every (re)spawn
+   * handshake. Required for $DATA_DIR/.codex/skills: codex 0.144.4 does NOT
+   * ancestor-walk from the thread cwd (Phase 1 QA finding M2 — without this
+   * the teach/memory skills are invisible to the model).
+   */
+  skillsExtraRoots?: string[];
   /** Called after an auto-restart handshake succeeds (ThreadManager re-resumes threads). */
   onRestarted?: () => void | Promise<void>;
   logger?: CodexLogger;

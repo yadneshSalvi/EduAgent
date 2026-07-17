@@ -16,9 +16,9 @@ export default function MemoryPage() {
         <EmptyState
           icon={GitCommitHorizontal}
           title="Your memory is a git repo."
-          description="Browse profile, mastery, and misconception files; scrub the Time Machine between any two days and watch your knowledge diff. It starts with your first lesson."
-          example="git log --oneline memory/ · 0 commits (for now)"
-          cta={{ label: 'Plant the first commit', href: '/app/learn' }}
+          description="Browse profile, mastery, and misconception files; scrub the Time Machine between any two days and watch your knowledge diff. The explorer is on its way — your tutor is already writing to the repo it will show."
+          example="git log --oneline memory/"
+          cta={{ label: 'Open a lesson', href: '/app/learn' }}
           secondaryCta={{ label: 'Export my memory', disabled: true }}
         />
       </div>

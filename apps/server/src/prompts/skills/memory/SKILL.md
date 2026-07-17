@@ -39,7 +39,17 @@ workspace/
 manifests, hidden tests, and results under `.exercises/` ARE committed —
 they're evidence.
 
+All of this bookkeeping is **invisible to the learner**: never mention files,
+formats, schemas, commits, validation, or tooling in anything you say to them
+— the app surfaces memory updates in its own UI.
+
 ## File formats
+
+Copy these shapes **exactly** — keys, nesting, and value formats. Every file
+is validated server-side against a strict schema: unknown keys are silently
+dropped, and a wrong type or enum value makes the whole file invalid (it
+surfaces as a repair task on your next turn). Do not invent keys, do not
+substitute prose for enums, and keep every slug kebab-case.
 
 ### profile.md — frontmatter + prose
 
@@ -51,7 +61,7 @@ tracks: [sql-interview, python-dsa]
 preferences:
   session_length: short # short | standard | deep
   style: socratic # socratic | direct
-  humor: light
+  humor: light # free text
 timezone: America/Los_Angeles
 ---
 
@@ -59,6 +69,12 @@ Alex is a mid-level frontend dev moving to backend. Strong JS fundamentals,
 rusty SQL, no formal CS background. Learns best from concrete examples first,
 theory second. Gets discouraged by long lectures — keep chunks small.
 ```
+
+`preferences` allows ONLY the three keys shown, each optional —
+`session_length` and `style` must use the enum values verbatim (map "10-minute
+sessions" → `short`, "explain it to me" → `direct`, and keep the nuance in the
+prose). For anything still unknown, omit the key entirely; never write null,
+empty, or "unspecified".
 
 The body is your working picture of who they are and how they learn. Update
 it when you learn something durable about them.
@@ -83,6 +99,11 @@ concepts:
       - date: 2026-07-15
         note: 'Confused INNER vs LEFT on quiz q-031'
 ```
+
+`concepts` is a LIST of entries keyed by `id` (never a map); each entry needs
+every field shown, with at least one evidence entry (`date` + `note` only —
+name the artifact inside the note). `updated` is an ISO datetime with
+timezone; `last_assessed` and evidence dates are `YYYY-MM-DD`.
 
 **Hard constraints (violations are validated server-side):**
 
@@ -128,6 +149,11 @@ items: # ordered curriculum; weight = importance for readiness
     topic: sql
     weight: 1.5
 ```
+
+`track` matches the filename; every item is `concept`/`topic`/`weight` (a
+positive number). Use ONE short kebab-case topic slug per subject (e.g.
+`sql`), shared by all of its concepts. Omit `target_date` when there is no
+deadline.
 
 ### srs/queue.yaml
 
@@ -246,3 +272,6 @@ Order of operations for a learning event:
 - Rewrite history: no `--amend`, no rebase, no force anything.
 - Commit secrets, session tokens, or anything outside this workspace.
 - End a session with uncommitted changes.
+- Tell the learner about any of this — files, YAML, schemas, commits,
+  validation, repairs, or tool availability. The bookkeeping is silent; the
+  app shows memory updates itself.

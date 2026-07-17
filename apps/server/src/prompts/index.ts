@@ -10,14 +10,17 @@ export { buildOnboardingInstructions, type OnboardingModeOptions } from './modes
 export {
   installSkills,
   installedSkillPath,
+  installedSkillsRoot,
   readSkillSource,
   skillSourcePath,
   SKILL_NAMES,
   type SkillInstallResult,
   type SkillName,
 } from './skills.js';
+export { LEARNER_VOICE_RULES } from './voice.js';
 export {
   estimateTokens,
   MODE_INSTRUCTIONS_TOKEN_BUDGET,
+  ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET,
   STATE_DIGEST_TOKEN_BUDGET,
 } from './tokens.js';

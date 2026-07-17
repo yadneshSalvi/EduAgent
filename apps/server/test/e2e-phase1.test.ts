@@ -302,6 +302,12 @@ describe.runIf(enabled)('Phase 1 golden path (real codex)', () => {
       expect(terminal!.type).toBe('turn.completed');
       expect(commitSeen, 'a memory.commit event on the thread socket').toBe(true);
 
+      // QA finding M2: onboarding's FIRST write must zod-validate — a learner
+      // model born broken poisons every later digest and greeting.
+      const onboardedModel = await services!.workspaces.readLearnerModel(me.id);
+      expect(onboardedModel.needsRepair, 'schema-invalid files right after onboarding').toEqual([]);
+      expect(onboardedModel.profile, 'profile.md parsed').not.toBeNull();
+
       // Deltas streamed on the answer turn(s).
       expect(t1Socket.events.some((e) => e.type === 'message.delta')).toBe(true);
       // The user socket got the memory.commit too (MemoryPipeline emitter).
@@ -338,9 +344,19 @@ describe.runIf(enabled)('Phase 1 golden path (real codex)', () => {
       const t2Items = threadItemsResponseSchema.parse(await api(`/api/threads/${t2.id}/items`));
       const t2Greeting = t2Items.items.filter((i) => i.role === 'agent' && i.kind === 'message');
       expect(t2Greeting.length).toBeGreaterThan(0);
-      const greetingText = (t2Greeting[0]!.payload as { text: string }).text;
+      // QA finding M1: the learn greeting must open with personal recall of
+      // the onboarding facts — and must not re-run a calibration interview.
+      // Soft-but-real: the greeting may span several messages; recall must
+      // appear in the concatenation, the anti-patterns in none of it.
+      const greetingText = t2Greeting.map((i) => (i.payload as { text: string }).text).join('\n');
       expect(greetingText.length).toBeGreaterThan(0);
-      console.log('[e2e] learn greeting:', greetingText.slice(0, 200));
+      console.log('[e2e] learn greeting:', greetingText.slice(0, 300));
+      expect(greetingText, 'greeting recalls the learner (goal/interview/SQL)').toMatch(
+        /interview|goal|sql/i,
+      );
+      expect(greetingText, 'greeting must not read as a first meeting').not.toMatch(
+        /no prior session|calibrat/i,
+      );
 
       // ---- kill the codex child; next turn must recover ---------------------
       const pids = codexChildPids();
@@ -375,6 +391,44 @@ describe.runIf(enabled)('Phase 1 golden path (real codex)', () => {
       const lastText = (lastAgent!.payload as { text: string }).text;
       expect(lastText.length).toBeGreaterThan(0);
       console.log('[e2e] post-recovery answer:', lastText.slice(0, 200));
+
+      // ---- QA finding M3: no plumbing narration, anywhere learner-visible --
+      // Broad scan is report-only (the word "commit" is sanctioned product
+      // vocabulary, 00 §9); the hard patterns are the offender classes QA
+      // quoted: formats/YAML/skills, "damaged/repair" narration, validation
+      // of files, and tool/skill-availability talk.
+      const transcript = [...t1Items.items, ...finalItems.items].filter(
+        (i) =>
+          i.role === 'agent' &&
+          i.kind === 'message' &&
+          (i.payload as { phase?: string | null }).phase !== 'commentary',
+      );
+      const broadPattern = /schema|yaml|commit|SKILL|tool.*(unavailable|isn't available)|validat/i;
+      const hardPattern = new RegExp(
+        [
+          String.raw`\byaml\b`,
+          String.raw`SKILL\.md`,
+          String.raw`\b(memory|teach) skill\b`,
+          String.raw`\b(files?|formats?|schemas?)\b[^.\n]{0,30}\b(damaged|invalid|outdated|corrupt)`,
+          String.raw`\brepair(ing|ed)?\b[^.\n]{0,30}\b(files?|formats?|schemas?|memory)\b`,
+          String.raw`\bvalidat\w*\b[^.\n]{0,30}\b(files?|formats?|schemas?)\b`,
+          String.raw`\b(tool|quiz|control|skill)\b[^.\n]{0,50}(unavailable|isn'?t available|not available|isn'?t installed|not installed)`,
+        ].join('|'),
+        'i',
+      );
+      const broadHits: string[] = [];
+      const hardHits: string[] = [];
+      for (const item of transcript) {
+        const text = (item.payload as { text: string }).text;
+        if (broadPattern.test(text)) broadHits.push(text.slice(0, 160));
+        if (hardPattern.test(text)) hardHits.push(text.slice(0, 200));
+      }
+      if (broadHits.length > 0) {
+        console.log(`[e2e] voice-scan report-only hits (${broadHits.length}):`);
+        for (const hit of broadHits) console.log(`  - ${hit}`);
+      }
+      expect(hardHits, 'learner-facing plumbing narration').toEqual([]);
+
       await dumpWorkspaceDiagnostics(me.id, 'final');
       passed = true;
     },

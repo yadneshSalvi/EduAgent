@@ -10,6 +10,12 @@ loadRootEnv({ path: path.resolve(process.cwd(), '../../.env'), quiet: true });
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@eduagent/shared'],
+  // Dev-only: `next dev` binds to localhost and silently blocks its own
+  // scripts/HMR when the page is opened via 127.0.0.1, leaving the page
+  // server-rendered but never hydrated (dead buttons, stuck spinners). The
+  // app supports both hosts (api base derives from window.location — QA m4),
+  // so allow both in dev too. Ignored by production builds.
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
 };
 
 export default nextConfig;
