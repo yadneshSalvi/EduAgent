@@ -13,8 +13,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { useDashboard } from '@/hooks/use-dashboard';
 import { useMe } from '@/hooks/use-me';
-import { PLACEHOLDER_DUE_COUNT, PLACEHOLDER_USER } from '@/lib/placeholder-data';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -22,19 +22,24 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   exact?: boolean;
-  badge?: number;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/app', icon: LayoutDashboard, exact: true },
   { label: 'Learn', href: '/app/learn', icon: GraduationCap },
-  { label: 'Review', href: '/app/review', icon: RotateCcw, badge: PLACEHOLDER_DUE_COUNT },
+  { label: 'Review', href: '/app/review', icon: RotateCcw },
   { label: 'Exam', href: '/app/exam', icon: Timer },
   { label: 'Memory', href: '/app/memory', icon: GitCommitHorizontal },
 ];
 
 export function AppSidebar() {
   const pathname = usePathname();
+  // Live due count + streak ride the shared dashboard query (invalidated on
+  // every memory.commit); failures just hide the badge — never block nav.
+  const { data: dashboard } = useDashboard();
+  const dueCount = dashboard
+    ? dashboard.reviewQueue.dueToday + dashboard.reviewQueue.overdue
+    : 0;
 
   return (
     <aside className="sticky top-0 flex h-dvh w-16 shrink-0 flex-col border-r bg-surface lg:w-60">
@@ -53,6 +58,7 @@ export function AppSidebar() {
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
+          const badge = item.href === '/app/review' ? dueCount : 0;
           return (
             <Link
               key={item.href}
@@ -68,9 +74,13 @@ export function AppSidebar() {
             >
               <Icon className="size-4.5 shrink-0" aria-hidden />
               <span className="hidden flex-1 lg:inline">{item.label}</span>
-              {item.badge ? (
-                <Badge variant="accent" className="hidden numeric lg:inline-flex">
-                  {item.badge}
+              {badge > 0 ? (
+                <Badge
+                  variant="accent"
+                  className="hidden numeric lg:inline-flex"
+                  aria-label={`${badge} reviews due`}
+                >
+                  {badge}
                 </Badge>
               ) : null}
             </Link>
@@ -78,17 +88,16 @@ export function AppSidebar() {
         })}
       </nav>
 
-      <UserChip />
+      <UserChip streakDays={dashboard?.user.streakDays ?? 0} />
     </aside>
   );
 }
 
 /**
- * The user chip: live from GET /auth/me. 401 / unreachable host render the
- * signed-out treatment. Streak stays placeholder until /api/dashboard
- * (Phase 2) supplies it.
+ * The user chip: identity from GET /auth/me, streak from the dashboard
+ * payload. 401 / unreachable host render the signed-out treatment.
  */
-function UserChip() {
+function UserChip({ streakDays }: { streakDays: number }) {
   const { data: me, isPending } = useMe();
   const name = me?.displayName ?? null;
 
@@ -120,12 +129,13 @@ function UserChip() {
             </span>
           ) : null}
         </span>
-        {PLACEHOLDER_USER.streakDays > 0 ? (
-          <span className="hidden items-center gap-1 text-warn lg:flex">
+        {streakDays > 0 ? (
+          <span
+            className="hidden items-center gap-1 text-warn lg:flex"
+            title={`${streakDays}-day streak`}
+          >
             <Flame className="size-4" aria-hidden />
-            <span className="numeric text-caption font-semibold">
-              {PLACEHOLDER_USER.streakDays}
-            </span>
+            <span className="numeric text-caption font-semibold">{streakDays}</span>
           </span>
         ) : null}
       </Link>

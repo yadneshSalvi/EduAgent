@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { AnimatePresence } from 'motion/react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { MemoryCommit } from '@eduagent/shared';
 import { parseWsFrame } from '@/hooks/use-turn-stream';
 import { userSocketUrl } from '@/lib/api';
@@ -46,12 +47,21 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<MemoryCommit[]>([]);
   const [drawerCommit, setDrawerCommit] = useState<MemoryCommit | null>(null);
   const seenShas = useRef(new Set<string>());
+  const queryClient = useQueryClient();
 
-  const publishCommit = useCallback((commit: MemoryCommit) => {
-    if (seenShas.current.has(commit.sha)) return;
-    seenShas.current.add(commit.sha);
-    setToasts((current) => [...current.slice(-(MAX_TOASTS - 1)), commit]);
-  }, []);
+  const publishCommit = useCallback(
+    (commit: MemoryCommit) => {
+      if (seenShas.current.has(commit.sha)) return;
+      seenShas.current.add(commit.sha);
+      setToasts((current) => [...current.slice(-(MAX_TOASTS - 1)), commit]);
+      // Server state moved (plans/04 §2): memory.commit invalidates the
+      // dashboard payload and every memory-explorer query.
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      void queryClient.invalidateQueries({ queryKey: ['memory'] });
+      void queryClient.invalidateQueries({ queryKey: ['review', 'queue'] });
+    },
+    [queryClient],
+  );
 
   const dismiss = useCallback((sha: string) => {
     setToasts((current) => current.filter((commit) => commit.sha !== sha));

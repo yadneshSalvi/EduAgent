@@ -236,11 +236,23 @@ export type ExamQuestions = z.infer<typeof examQuestionsSchema>;
 export const examAnswersSchema = z.record(z.string(), z.string());
 export type ExamAnswers = z.infer<typeof examAnswersSchema>;
 
-/** The persisted `Exam.result` payload — ui_grade_exam args minus token/exam_id. */
-export const examResultSchema = uiGradeExamArgsSchema.omit({
-  session_token: true,
-  exam_id: true,
-});
+/**
+ * The persisted `Exam.result` payload — ui_grade_exam args minus token/exam_id,
+ * plus the server-computed exact readiness snapshot (plans/06 Phase 4 task 4:
+ * store the post-exam readiness so result deltas are exact). When the snapshot
+ * fields are present, `readiness_delta` equals `readiness_after -
+ * readiness_before` as computed by the same learning-math the dashboard uses —
+ * not the agent's estimate.
+ */
+export const examResultSchema = uiGradeExamArgsSchema
+  .omit({
+    session_token: true,
+    exam_id: true,
+  })
+  .extend({
+    readiness_before: z.number().min(0).max(100).optional(),
+    readiness_after: z.number().min(0).max(100).optional(),
+  });
 export type ExamResult = z.infer<typeof examResultSchema>;
 
 /**
@@ -327,9 +339,11 @@ export const memoryFileResponseSchema = z.object({
 });
 export type MemoryFileResponse = z.infer<typeof memoryFileResponseSchema>;
 
-/** GET /api/memory/log?limit= */
+/** GET /api/memory/log?limit=&skip= */
 export const memoryLogQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).optional(),
+  /** Commits to skip from the top of the log (pagination; default 0). */
+  skip: z.coerce.number().int().min(0).optional(),
 });
 export type MemoryLogQuery = z.infer<typeof memoryLogQuerySchema>;
 

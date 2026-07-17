@@ -3,24 +3,38 @@ import {
   apiErrorSchema,
   createThreadRequestSchema,
   createThreadResponseSchema,
+  dashboardDataSchema,
   exerciseDtoSchema,
   listThreadsResponseSchema,
   localLoginRequestSchema,
   localUsersResponseSchema,
   meResponseSchema,
+  memoryDiffResponseSchema,
+  memoryFileResponseSchema,
+  memoryLogResponseSchema,
+  memoryTreeResponseSchema,
   okResponseSchema,
+  reviewQueueResponseSchema,
+  startReviewResponseSchema,
   submitExerciseRequestSchema,
   submitExerciseResponseSchema,
   submitQuizRequestSchema,
   threadItemsResponseSchema,
   type CreateThreadRequest,
   type CreateThreadResponse,
+  type DashboardData,
   type ExerciseDto,
   type ListThreadsResponse,
   type LocalLoginRequest,
   type LocalUsersResponse,
   type MeResponse,
+  type MemoryDiffResponse,
+  type MemoryFileResponse,
+  type MemoryLogResponse,
+  type MemoryTreeResponse,
   type OkResponse,
+  type ReviewQueueResponse,
+  type StartReviewResponse,
   type SubmitExerciseRequest,
   type SubmitExerciseResponse,
   type SubmitQuizRequest,
@@ -252,4 +266,63 @@ export function submitQuiz(quizId: string, request: SubmitQuizRequest): Promise<
     body: submitQuizRequestSchema.parse(request),
     schema: okResponseSchema,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard · review · memory explorer (Phase 3)
+// ---------------------------------------------------------------------------
+
+export function getDashboard(signal?: AbortSignal): Promise<DashboardData> {
+  return apiFetch('/api/dashboard', { schema: dashboardDataSchema, signal });
+}
+
+export function getReviewQueue(signal?: AbortSignal): Promise<ReviewQueueResponse> {
+  return apiFetch('/api/review/queue', { schema: reviewQueueResponseSchema, signal });
+}
+
+/** 409 {error:"nothing_due"} when the queue is empty — surfaces as ApiError. */
+export function startReview(): Promise<StartReviewResponse> {
+  return apiFetch('/api/review/start', { method: 'POST', schema: startReviewResponseSchema });
+}
+
+/** 404 {error:"no_memory"} before onboarding — a designed state, not a crash. */
+export function getMemoryTree(signal?: AbortSignal): Promise<MemoryTreeResponse> {
+  return apiFetch('/api/memory/tree', { schema: memoryTreeResponseSchema, signal });
+}
+
+export function getMemoryFile(
+  path: string,
+  ref?: string,
+  signal?: AbortSignal,
+): Promise<MemoryFileResponse> {
+  const query = new URLSearchParams({ path });
+  if (ref) query.set('ref', ref);
+  return apiFetch(`/api/memory/file?${query}`, { schema: memoryFileResponseSchema, signal });
+}
+
+export function getMemoryLog(
+  options: { limit?: number; skip?: number } = {},
+  signal?: AbortSignal,
+): Promise<MemoryLogResponse> {
+  const query = new URLSearchParams();
+  if (options.limit !== undefined) query.set('limit', String(options.limit));
+  if (options.skip !== undefined) query.set('skip', String(options.skip));
+  const suffix = query.size > 0 ? `?${query}` : '';
+  return apiFetch(`/api/memory/log${suffix}`, { schema: memoryLogResponseSchema, signal });
+}
+
+export function getMemoryDiff(
+  from: string,
+  to: string,
+  path?: string,
+  signal?: AbortSignal,
+): Promise<MemoryDiffResponse> {
+  const query = new URLSearchParams({ from, to });
+  if (path) query.set('path', path);
+  return apiFetch(`/api/memory/diff?${query}`, { schema: memoryDiffResponseSchema, signal });
+}
+
+/** Plain href for the "Export my memory" button — the browser downloads the zip. */
+export function memoryExportUrl(): string {
+  return `${serverBaseUrl()}/api/memory/export`;
 }

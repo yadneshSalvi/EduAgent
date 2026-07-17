@@ -1,26 +1,12 @@
 import type { Metadata } from 'next';
-import { LayoutDashboard } from 'lucide-react';
-import { PageHeader } from '@/components/shared/page-header';
-import { EmptyState } from '@/components/shared/empty-state';
+import { DashboardView } from '@/components/dashboard/dashboard-view';
 
 export const metadata: Metadata = { title: 'Dashboard' };
 
+/**
+ * The dashboard home (plans/04 §4) — everything renders client-side from
+ * GET /api/dashboard, invalidated live on memory commits.
+ */
 export default function DashboardPage() {
-  return (
-    <>
-      <PageHeader
-        title="Dashboard"
-        description="Mastery, forgetting curves, streak, and your memory timeline — at a glance."
-      />
-      <div className="flex flex-1 items-center justify-center p-8">
-        <EmptyState
-          icon={LayoutDashboard}
-          title="Your dashboard is on its way."
-          description="Every session feeds this view: a mastery heatmap, forgetting curves, readiness per track, and a live feed of commits to your memory."
-          example="learn(sql): inner joins clicked — mastery 0.40 → 0.72"
-          cta={{ label: 'Start learning', href: '/app/learn' }}
-        />
-      </div>
-    </>
-  );
+  return <DashboardView />;
 }

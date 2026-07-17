@@ -330,10 +330,70 @@
   }
 }
 
+/* Fading-pulse (05 §5): the ONLY other allowed loop — decaying heatmap cells
+   breathe their amber overlay, 2.5s, ±6% opacity. */
+.fading-pulse {
+  animation: fading-pulse 2.5s ease-in-out infinite;
+}
+@keyframes fading-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.29;
+  }
+}
+
+/* Time-machine dual-range slider (plans/04 §7): two overlaid native range
+   inputs — keyboard accessible — with only the thumbs interactive. */
+.tm-range {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  pointer-events: none;
+  margin: 0;
+}
+.tm-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: ew-resize;
+}
+.tm-range::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: ew-resize;
+}
+.tm-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tm-range:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Reduced motion (05 §9): loops stop; everything settles to steady state. */
 @media (prefers-reduced-motion: reduce) {
   .streaming-md .chat-prose > p:last-child::after,
-  .chip-dots span {
+  .chip-dots span,
+  .fading-pulse {
     animation: none;
   }
 }
