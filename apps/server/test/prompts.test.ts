@@ -11,13 +11,17 @@ import {
   buildContextEnvelope,
   buildLearnInstructions,
   buildOnboardingInstructions,
+  buildReviewInstructions,
   estimateTokens,
+  formatReviewDueNotes,
   MODE_INSTRUCTIONS_TOKEN_BUDGET,
   ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET,
   readSkillSource,
+  REVIEW_KICKOFF_INPUT,
   SKILL_NAMES,
 } from '../src/prompts/index.js';
 import { parseCommit } from '../src/workspace/index.js';
+import type { LearnerModel } from '../src/workspace/index.js';
 
 const TOKEN = 'tok_sentinel_12345';
 
@@ -55,10 +59,27 @@ describe('mode templates (plans/03 §6.3–6.4)', () => {
     for (const text of [
       buildLearnInstructions({ sessionToken: TOKEN, topicSlug: 'sql' }),
       buildOnboardingInstructions({ sessionToken: TOKEN }),
+      buildReviewInstructions({ sessionToken: TOKEN }),
     ]) {
       expect(text).toContain('Learner-facing voice');
       expect(text).toContain('Memory bookkeeping is SILENT');
     }
+  });
+
+  it('review instructions carry the token, the quiz-driven procedure, and stay in budget', () => {
+    const text = buildReviewInstructions({ sessionToken: TOKEN });
+    expect(text).toContain(TOKEN);
+    expect(text).toContain('Mode: REVIEW');
+    expect(text).toContain('ui_push_quiz');
+    expect(text).toContain('ONE concept at a time');
+    expect(text).toContain('NEW questions');
+    expect(text).toContain('SM-2');
+    expect(text).toContain('review(<topic>)');
+    expect(text).toContain('ui_record_assessment');
+    expect(text).toContain('memory skill');
+    expect(text).toContain(REVIEW_KICKOFF_INPUT);
+    expect(text).toContain('Never reveal this token');
+    expect(estimateTokens(text)).toBeLessThanOrEqual(MODE_INSTRUCTIONS_TOKEN_BUDGET);
   });
 
   it('onboarding instructions carry the token, interview flow, and the exact init commit', () => {
@@ -115,6 +136,65 @@ describe('buildContextEnvelope', () => {
     const noteIndex = envelope.indexOf('Due concepts');
     expect(noteIndex).toBeGreaterThan(-1);
     expect(noteIndex).toBeLessThan(envelope.indexOf('</eduagent-context>'));
+  });
+});
+
+describe('formatReviewDueNotes', () => {
+  const model = (items: LearnerModel['srs']['items']): LearnerModel => ({
+    profile: null,
+    tracks: [],
+    topics: [
+      {
+        topic: 'sql',
+        displayName: 'SQL',
+        mastery: {
+          topic: 'sql',
+          display_name: 'SQL',
+          updated: '2026-07-16T00:00:00Z',
+          concepts: [
+            {
+              id: 'inner-join',
+              name: 'INNER JOIN',
+              mastery: 0.7,
+              confidence: 'medium',
+              last_assessed: '2026-07-10',
+              review_count: 1,
+              prereqs: [],
+              evidence: [{ date: '2026-07-10', note: 'x' }],
+            },
+          ],
+        },
+        openMisconceptions: [],
+      },
+    ],
+    srs: { items },
+    lastSession: null,
+    needsRepair: [],
+  });
+  const now = new Date('2026-07-16T12:00:00Z');
+
+  it('lists due items top-down with names and overdue markers', () => {
+    const notes = formatReviewDueNotes(
+      model([
+        { concept: 'inner-join', topic: 'sql', due: '2026-07-14', interval_days: 3, ease: 2.5, lapses: 0 },
+        { concept: 'left-join', topic: 'sql', due: '2026-07-16', interval_days: 1, ease: 2.5, lapses: 0 },
+        { concept: 'later-one', topic: 'sql', due: '2026-07-20', interval_days: 5, ease: 2.5, lapses: 0 },
+      ]),
+      now,
+    );
+    const text = notes.join('\n');
+    expect(notes[0]).toContain('REVIEW DUE (2 concepts, 1 overdue)');
+    expect(text).toContain('sql/inner-join (INNER JOIN) — due 2026-07-14 (overdue)');
+    expect(text).toContain('sql/left-join — due 2026-07-16');
+    expect(text).not.toContain('later-one');
+    // Overdue first.
+    expect(text.indexOf('inner-join')).toBeLessThan(text.indexOf('left-join'));
+  });
+
+  it('an empty queue tells the agent to close, not invent reviews', () => {
+    const text = formatReviewDueNotes(model([]), now).join('\n');
+    expect(text).toContain('nothing is due');
+    expect(text).toContain('do not invent reviews');
   });
 });
 

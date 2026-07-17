@@ -20,6 +20,8 @@ import {
   buildContextEnvelope,
   buildLearnInstructions,
   buildOnboardingInstructions,
+  buildReviewInstructions,
+  formatReviewDueNotes,
 } from '../prompts/index.js';
 import { formatStateDigest } from '../workspace/index.js';
 import type { MemoryPipeline, WorkspaceManager } from '../workspace/index.js';
@@ -166,10 +168,10 @@ export class ThreadManager implements ThreadService {
     mode: ThreadMode,
     opts: { topicSlug?: string | null } = {},
   ): Promise<EnsureThreadResult> {
-    if (mode !== 'learn') {
+    if (mode !== 'learn' && mode !== 'review') {
       throw new Error(
-        `ThreadManager.ensureThread: mode "${mode}" is not creatable in Phase 1 ` +
-          '(review lands with ReviewService, exam threads are forked by ExamService)',
+        `ThreadManager.ensureThread: mode "${mode}" is not creatable directly ` +
+          '(exam threads are forked by ExamService)',
       );
     }
     const topicSlug = opts.topicSlug ?? null;
@@ -281,7 +283,7 @@ export class ThreadManager implements ThreadService {
         codexThreadId: started.thread.id,
         mode,
         topicSlug,
-        title: this.titleFor(topicSlug, onboarded),
+        title: this.titleFor(mode, topicSlug, onboarded),
         sessionToken,
       },
     });
@@ -314,6 +316,11 @@ export class ThreadManager implements ThreadService {
     sessionToken: string;
     onboarded: boolean;
   }): Promise<string> {
+    // Review threads exist only for learners with an SRS queue (ReviewService
+    // guards on due items), so the onboarding branch never applies to them.
+    if (opts.mode === 'review') {
+      return buildReviewInstructions({ sessionToken: opts.sessionToken });
+    }
     if (!opts.onboarded) {
       // The account name keeps profile.md's required `name:` from coming out
       // null when the learner never states one (E2E prompt-bug finding).
@@ -330,7 +337,8 @@ export class ThreadManager implements ThreadService {
     });
   }
 
-  private titleFor(topicSlug: string | null, onboarded: boolean): string {
+  private titleFor(mode: ThreadMode, topicSlug: string | null, onboarded: boolean): string {
+    if (mode === 'review') return 'Review session';
     if (!onboarded) return 'Getting to know you';
     return topicSlug ? `Learning ${topicSlug}` : 'Learning session';
   }
@@ -395,7 +403,14 @@ export class ThreadManager implements ThreadService {
 
     const model = await this.workspaces.readLearnerModel(thread.userId);
     const digest = formatStateDigest(model);
-    const input = buildContextEnvelope(digest, { needsRepair: model.needsRepair }) + text;
+    // Review threads get the FULL due list each turn (the digest previews only
+    // 3) — it shrinks live as the agent updates srs/queue.yaml between turns.
+    const notes = thread.mode === 'review' ? formatReviewDueNotes(model, new Date()) : undefined;
+    const input =
+      buildContextEnvelope(digest, {
+        needsRepair: model.needsRepair,
+        ...(notes !== undefined ? { notes } : {}),
+      }) + text;
     const sinceSha = await this.memory.beforeTurn(thread.userId);
 
     // The mirror stores the RAW text (the envelope is wire-only context);

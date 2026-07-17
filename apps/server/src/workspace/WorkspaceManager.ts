@@ -61,6 +61,15 @@ export class WorkspaceManager {
     return workspacePathFor(this.config, userId);
   }
 
+  /**
+   * True once the user's workspace repo exists on disk. Read-only endpoints
+   * (dashboard, memory explorer) use this instead of ensureWorkspace so a GET
+   * never creates state — and never constructs a GitService on a missing dir.
+   */
+  hasWorkspace(userId: string): boolean {
+    return existsSync(path.join(this.pathFor(userId), '.git'));
+  }
+
   /** GitService scoped to this user's workspace (cached per user). */
   git(userId: string): GitService {
     let service = this.gitServices.get(userId);

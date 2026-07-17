@@ -1,8 +1,6 @@
 /**
- * Phase 1+ module stub — nothing here is wired yet.
- *
- * Lands here (plans/03_backend.md §3.5): SrsEngine (read-only derivations
- * over srs/queue.yaml), DashboardService (DashboardData + per-user cache),
- * ReviewService, ExamService (the Exam.status state machine).
+ * Learning services (plans/03 §3.5). Still to land here: ExamService (Phase 4).
  */
-export {};
+export { DashboardService, type DashboardServiceDeps } from './DashboardService.js';
+export { ReviewService, NothingDueError, type ReviewServiceDeps } from './ReviewService.js';
+export { dueSummary, nextDueProjection, type DueSummary } from './SrsEngine.js';

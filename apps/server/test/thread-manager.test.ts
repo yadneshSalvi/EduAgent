@@ -208,8 +208,31 @@ describe('ensureThread', () => {
     expect(fake.received.filter((m) => m.method === 'thread/start').length).toBe(before);
   });
 
-  it('rejects non-learn modes (Phase 1)', async () => {
+  it('rejects exam mode (forked by ExamService, never created directly)', async () => {
     await expect(manager.ensureThread(USER_ID, 'exam')).rejects.toThrow(/not creatable/);
+  });
+
+  it('creates review threads with review instructions + REVIEW DUE envelope notes', async () => {
+    scriptCannedTurns(fake, counters);
+    const { thread, created } = await manager.ensureThread(USER_ID, 'review');
+    expect(created).toBe(true);
+    expect(thread.mode).toBe('review');
+    expect(thread.title).toBe('Review session');
+
+    const started = await fake.waitFor((m) => m.method === 'thread/start');
+    const instructions = (started.params as { developerInstructions: string })
+      .developerInstructions;
+    expect(instructions).toContain('Mode: REVIEW');
+    expect(instructions).toContain('ui_push_quiz');
+    expect(instructions).toContain(thread.sessionToken);
+
+    // The greeting turn's envelope carries the full due list (empty queue on
+    // this fresh workspace → the explicit "nothing is due" directive).
+    await sink.until((r) => r.event.type === 'turn.completed');
+    const turnStart = await fake.waitFor((m) => m.method === 'turn/start');
+    const input = (turnStart.params as { input: Array<{ text: string }> }).input[0]!.text;
+    expect(input).toContain('REVIEW DUE');
+    expect(input).toContain('nothing is due');
   });
 });
 

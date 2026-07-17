@@ -11,6 +11,7 @@ import type { PrismaClient } from '@prisma/client';
 import { WsGateway } from './api/gateway.js';
 import { AppServerClient, type CodexLogger, type ElicitationApprover, type HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
+import { DashboardService, ReviewService } from './learning/index.js';
 import { installedSkillsRoot, SKILL_NAMES } from './prompts/index.js';
 import { UiToolRelay } from './relay/index.js';
 import { ThreadManager } from './threads/index.js';
@@ -40,6 +41,8 @@ export interface AppServices {
   /** The port the relay actually bound (config.relayPort, or ephemeral in tests). */
   relayPort: number;
   codexHealth: () => Promise<HealthProbe>;
+  dashboard: DashboardService;
+  review: ReviewService;
 }
 
 export interface CreateServicesDeps {
@@ -90,8 +93,18 @@ export async function createServices({
     throw err;
   }
 
-  const memory = new MemoryPipeline({ workspaces, prisma, emitter: gateway, logger });
+  const dashboard = new DashboardService({ prisma, workspaces, logger });
+  const memory = new MemoryPipeline({
+    workspaces,
+    prisma,
+    emitter: gateway,
+    logger,
+    // The plans/03 §3.4 cache-invalidation hook: every turn that produced
+    // memory commits drops that user's cached DashboardData.
+    onMemoryChanged: (userId) => dashboard.invalidate(userId),
+  });
   threads = new ThreadManager({ prisma, client, workspaces, memory, sink: gateway, logger });
+  const review = new ReviewService({ prisma, workspaces, threads, logger });
 
   return {
     workspaces,
@@ -101,6 +114,8 @@ export async function createServices({
     relay,
     relayPort,
     codexHealth: () => client.healthProbe(),
+    dashboard,
+    review,
   };
 }
 

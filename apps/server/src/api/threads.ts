@@ -81,8 +81,8 @@ export const threadRoutes: FastifyPluginAsync = async (app) => {
         400,
         'unsupported_mode',
         body.data.mode === 'exam'
-          ? 'Exam threads are forked via POST /api/exams (Phase 2).'
-          : 'Review sessions start via POST /api/review/start (Phase 2).',
+          ? 'Exam threads are forked via POST /api/exams (Phase 4).'
+          : 'Review sessions start via POST /api/review/start.',
       );
     }
     const { thread } = await threads.ensureThread(authed.userId, 'learn', {

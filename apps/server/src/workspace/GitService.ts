@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import {
   MASTERY_DELTA_RE,
@@ -161,20 +163,21 @@ export class GitService {
     return this.git.diff([`${from}..${to}`, ...(filePath ? ['--', filePath] : [])]);
   }
 
+  /** Numstat totals between two refs (the time-machine summary strip). */
+  async diffStats(from: string, to: string, filePath?: string): Promise<DiffStats> {
+    const numstat = await this.git.diff([
+      '--numstat',
+      `${from}..${to}`,
+      ...(filePath ? ['--', filePath] : []),
+    ]);
+    return parseNumstat(numstat);
+  }
+
   /** Full diff + numstat totals for a single commit (root commit included). */
   async diffForCommit(sha: string): Promise<CommitDiff> {
     const diff = await this.git.show(['--format=', '--patch', sha]);
     const numstat = await this.git.show(['--format=', '--numstat', sha]);
-    const stats: DiffStats = { filesChanged: 0, insertions: 0, deletions: 0 };
-    for (const line of numstat.split('\n')) {
-      const match = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
-      if (!match) continue;
-      stats.filesChanged += 1;
-      // Binary files report "-" for both counts.
-      stats.insertions += match[1] === '-' ? 0 : Number(match[1]);
-      stats.deletions += match[2] === '-' ? 0 : Number(match[2]);
-    }
-    return { diff, stats };
+    return { diff, stats: parseNumstat(numstat) };
   }
 
   /**
@@ -210,4 +213,70 @@ export class GitService {
       return [];
     }
   }
+
+  /**
+   * Workspace-relative paths of all files in a COMMIT's tree (default HEAD).
+   * The memory explorer serves committed content only (plans/03 §7) — this is
+   * the tree that matches what `blobAtRef` can serve.
+   */
+  async lsTree(ref = 'HEAD'): Promise<string[]> {
+    try {
+      const out = await this.git.raw(['ls-tree', '-r', '--name-only', ref]);
+      return out.split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Blob content at `ref:path`, or null when the path is absent at that ref
+   * OR is not a regular file (directories/submodules never leak as content).
+   * Unlike `fileAtRef` (which `git show`s whatever the spec names), this
+   * verifies the object type first — the memory-explorer file endpoint uses
+   * it so a directory path can't return a tree listing.
+   */
+  async blobAtRef(ref: string, filePath: string): Promise<string | null> {
+    const spec = `${ref}:${filePath.split(/[\\/]/).join('/')}`;
+    try {
+      const type = (await this.git.catFile(['-t', spec])).trim();
+      if (type !== 'blob') return null;
+      return await this.git.catFile(['blob', spec]);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Zip of the full tree at `ref` (default HEAD) via `git archive` — exactly
+   * the committed content, so gitignored/untracked files can never ride along
+   * (plans/03 §7, plans/04 §7 "Export my memory"). Null before the first
+   * commit. Spawned directly (not simple-git) because the output is binary.
+   */
+  async archiveZip(ref = 'HEAD'): Promise<Buffer | null> {
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['-C', this.workspaceDir, 'archive', '--format=zip', ref],
+        { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024 },
+      );
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+}
+
+const execFileAsync = promisify(execFile);
+
+function parseNumstat(numstat: string): DiffStats {
+  const stats: DiffStats = { filesChanged: 0, insertions: 0, deletions: 0 };
+  for (const line of numstat.split('\n')) {
+    const match = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+    if (!match) continue;
+    stats.filesChanged += 1;
+    // Binary files report "-" for both counts.
+    stats.insertions += match[1] === '-' ? 0 : Number(match[1]);
+    stats.deletions += match[2] === '-' ? 0 : Number(match[2]);
+  }
+  return stats;
 }

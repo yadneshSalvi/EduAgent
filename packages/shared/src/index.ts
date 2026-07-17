@@ -1,4 +1,5 @@
 export * from './common';
+export * from './learning-math';
 export * from './learner-model/index';
 export * from './memory-commit';
 export * from './mcp-tools';

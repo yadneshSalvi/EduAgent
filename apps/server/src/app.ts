@@ -8,15 +8,19 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type { PrismaClient } from '@prisma/client';
 import { authRoutes } from './api/auth.js';
+import { dashboardRoutes } from './api/dashboard.js';
 import { exerciseRoutes } from './api/exercises.js';
 import type { WsGateway } from './api/gateway.js';
 import { healthRoutes } from './api/health.js';
+import { memoryRoutes } from './api/memory.js';
 import { quizRoutes } from './api/quiz.js';
+import { reviewRoutes } from './api/review.js';
 import { threadRoutes } from './api/threads.js';
 import { wsRoutes } from './api/ws.js';
 import { createAuthProvider, type AuthedUser } from './auth/index.js';
 import type { HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
+import type { DashboardService, ReviewService } from './learning/index.js';
 import type { ThreadService } from './threads/index.js';
 import type { WorkspaceManager } from './workspace/index.js';
 
@@ -31,6 +35,9 @@ declare module 'fastify' {
     threads?: ThreadService;
     wsGateway?: WsGateway;
     codexHealth?: () => Promise<HealthProbe>;
+    /** Phase 3 services. */
+    dashboard?: DashboardService;
+    review?: ReviewService;
   }
 }
 
@@ -40,6 +47,8 @@ export interface AppServiceSet {
   threads?: ThreadService;
   gateway?: WsGateway;
   codexHealth?: () => Promise<HealthProbe>;
+  dashboard?: DashboardService;
+  review?: ReviewService;
   /** When present, closed on app.close() (terminates the codex child). */
   client?: { close(): Promise<void> };
   /** When present, closed on app.close() (stops the UiToolRelay listener). */
@@ -80,6 +89,8 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
     if (resolved.threads) app.decorate('threads', resolved.threads);
     if (resolved.gateway) app.decorate('wsGateway', resolved.gateway);
     if (resolved.codexHealth) app.decorate('codexHealth', resolved.codexHealth);
+    if (resolved.dashboard) app.decorate('dashboard', resolved.dashboard);
+    if (resolved.review) app.decorate('review', resolved.review);
     const client = resolved.client;
     const relay = resolved.relay;
     if (client || relay) {
@@ -95,6 +106,9 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
   await app.register(threadRoutes);
   await app.register(exerciseRoutes);
   await app.register(quizRoutes);
+  await app.register(dashboardRoutes);
+  await app.register(memoryRoutes);
+  await app.register(reviewRoutes);
   await app.register(wsRoutes);
 
   return app;

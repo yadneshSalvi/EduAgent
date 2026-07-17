@@ -8,6 +8,12 @@ export { buildContextEnvelope, type ContextEnvelopeOptions } from './envelope.js
 export { buildLearnInstructions, type LearnModeOptions } from './modes/learn.js';
 export { buildOnboardingInstructions, type OnboardingModeOptions } from './modes/onboarding.js';
 export {
+  buildReviewInstructions,
+  formatReviewDueNotes,
+  REVIEW_KICKOFF_INPUT,
+  type ReviewModeOptions,
+} from './modes/review.js';
+export {
   installSkills,
   installedSkillPath,
   installedSkillsRoot,
