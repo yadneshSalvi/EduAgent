@@ -215,8 +215,13 @@ describe.runIf(enabled)('Phase 4 exam golden path (real codex)', () => {
     return { event, index };
   }
 
-  const examThreadId = async (examId: string): Promise<string> =>
-    (await prisma!.exam.findUniqueOrThrow({ where: { id: examId } })).threadId;
+  /** Via the DTO — asserts the wire contract carries the forked thread id. */
+  const examThreadId = async (examId: string): Promise<string> => {
+    const dto = await getExam(examId);
+    const row = await prisma!.exam.findUniqueOrThrow({ where: { id: examId } });
+    expect(dto.threadId).toBe(row.threadId);
+    return dto.threadId;
+  };
 
   const getExam = async (examId: string): Promise<ExamDto> =>
     examDtoSchema.parse(await api(`/api/exams/${examId}`));

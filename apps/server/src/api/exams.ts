@@ -15,6 +15,7 @@ import {
 } from '@eduagent/shared';
 import {
   DeadlinePassedError,
+  ExamForkError,
   ExamStateError,
   parseExamConfig,
   UnknownTrackError,
@@ -54,6 +55,9 @@ export const examRoutes: FastifyPluginAsync = async (app) => {
     }
     if (err instanceof DeadlinePassedError) {
       return sendError(reply, 409, 'deadline_passed', err.message);
+    }
+    if (err instanceof ExamForkError) {
+      return sendError(reply, 503, 'fork_failed', err.message);
     }
     if (err instanceof ExamStateError) {
       return sendError(reply, 409, 'invalid_state', err.message);
@@ -162,6 +166,7 @@ function toExamSummary(exam: Exam): ExamSummary {
   const config = parseExamConfig(exam.config);
   return {
     id: exam.id,
+    threadId: exam.threadId,
     trackSlug: exam.trackSlug,
     status: exam.status as ExamSummary['status'],
     durationMin: config.durationMin,

@@ -245,6 +245,9 @@ describe('GET /api/exams/:id', () => {
     );
     expect(draft.questions).toBeNull();
     expect(draft.durationMin).toBe(30);
+    // The DTO names its forked thread — the socket the exam UI streams from.
+    const row = await prisma.exam.findUniqueOrThrow({ where: { id: examId } });
+    expect(draft.threadId).toBe(row.threadId);
 
     await prisma.exam.update({ where: { id: examId }, data: { status: 'ready' } });
     const ready = examDtoSchema.parse(

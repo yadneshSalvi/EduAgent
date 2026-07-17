@@ -33,6 +33,10 @@ import { sendError } from './http.js';
  * an abbreviated/full hex sha (the time machine scrubs the parsed log). The
  * allowlist doubles as flag-injection protection — nothing here can start
  * with `-` or smuggle range/path syntax.
+ *
+ * The hex form DELIBERATELY admits git's well-known empty-tree sha
+ * (4b825dc642cb6eb9a060e54bf8d69288fbee4904, present in every repo): the web
+ * diffs the ROOT commit as `empty-tree..sha` (TimelineFeed, ExamResults).
  */
 const REF_RE = /^(HEAD(~\d{1,4})?|main|[0-9a-fA-F]{4,40})$/;
 
@@ -162,8 +166,19 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
       const issues = [...(query.success ? [] : query.error.issues), ...(extra.success ? [] : extra.error.issues)];
       return sendError(reply, 400, 'invalid_query', formatIssues(issues));
     }
+    let logPath: string | undefined;
+    if (query.data.path !== undefined) {
+      const safe = safeRelPath(query.data.path);
+      if (safe === null) {
+        return sendError(reply, 400, 'invalid_path', 'Not a workspace-relative file path.');
+      }
+      logPath = safe;
+    }
     const limit = query.data.limit ?? 100;
-    const log = await owned.git.log({ maxCount: extra.data.skip + limit });
+    const log = await owned.git.log({
+      maxCount: extra.data.skip + limit,
+      ...(logPath !== undefined ? { path: logPath } : {}),
+    });
     const commits: TimelineEntry[] = log.slice(extra.data.skip).map((info) => {
       const parsed = parseCommit(info.message);
       const instantMs = Date.parse(info.date);

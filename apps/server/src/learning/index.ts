@@ -4,6 +4,7 @@
 export { DashboardService, type DashboardServiceDeps } from './DashboardService.js';
 export {
   DeadlinePassedError,
+  ExamForkError,
   ExamService,
   ExamStateError,
   UnknownTrackError,

@@ -49,17 +49,20 @@ const TYPE_BADGE: Record<MemoryCommitType, string> = {
 
 function HistoryRail({
   commits,
+  fileName,
   viewRef,
   onSelect,
 }: {
   commits: TimelineEntry[];
+  /** Selected file's basename — the rail is that file's history (plans/04 §7). */
+  fileName: string | null;
   viewRef: string;
   onSelect: (sha: string) => void;
 }) {
   return (
     <aside aria-label="Commit history" className="flex h-full min-h-0 flex-col">
-      <p className="shrink-0 border-b px-4 py-2.5 font-mono text-caption uppercase tracking-wide text-muted-foreground">
-        history
+      <p className="shrink-0 truncate border-b px-4 py-2.5 font-mono text-caption uppercase tracking-wide text-muted-foreground">
+        history{fileName !== null ? ` · ${fileName}` : ''}
       </p>
       <ul className="min-h-0 flex-1 overflow-y-auto p-2">
         {commits.map((commit, index) => {
@@ -281,6 +284,16 @@ export function MemoryExplorer() {
     retry: false,
   });
 
+  // The right rail is the SELECTED FILE's history (plans/04 §7); the full
+  // journal above feeds the time machine.
+  const fileLogQuery = useQuery({
+    queryKey: ['memory', 'log', 'file', path],
+    queryFn: ({ signal }) => getMemoryLog({ limit: 200, path: path! }, signal),
+    enabled: path !== null,
+    retry: false,
+  });
+  const railCommits = path !== null ? (fileLogQuery.data?.commits ?? []) : newestFirst;
+
   // Pre-onboarding (404 no_memory): the designed empty state, not a crash.
   if (treeQuery.error instanceof ApiError && treeQuery.error.status === 404) {
     return (
@@ -436,7 +449,7 @@ export function MemoryExplorer() {
         </div>
 
         <div className="hidden min-h-0 border-l lg:block">
-          {logQuery.isPending ? (
+          {logQuery.isPending || (path !== null && fileLogQuery.isPending) ? (
             <div className="animate-pulse space-y-3 p-4">
               {Array.from({ length: 6 }, (_, i) => (
                 <div key={i} className="h-14 rounded-md bg-surface-2" />
@@ -444,7 +457,8 @@ export function MemoryExplorer() {
             </div>
           ) : (
             <HistoryRail
-              commits={newestFirst}
+              commits={railCommits}
+              fileName={path !== null ? (path.split('/').at(-1) ?? path) : null}
               viewRef={viewRef}
               onSelect={(sha) => {
                 setViewRef(sha);

@@ -495,7 +495,16 @@ export function ExamRoom({
             </div>
             <QuestionPalette items={palette} onJump={jumpTo} />
           </div>
-          <ExamTimer deadlineMs={deadlineMs} onExpire={() => setExpired(true)} />
+          <ExamTimer
+            deadlineMs={deadlineMs}
+            onExpire={() => {
+              setExpired(true);
+              // Flush keystrokes still inside the debounce window — the
+              // server accepts autosaves for EXAM_GRACE_MS past the deadline
+              // precisely so the sweep grades what was typed last.
+              if (clockRef.current.dirtySince !== null) void persist();
+            }}
+          />
           <Button
             onClick={() => setConfirmOpen(true)}
             disabled={expired || submitting}

@@ -65,6 +65,14 @@ export class DeadlinePassedError extends Error {
   }
 }
 
+/** Thrown when the memory fork itself fails — routes map to 503 fork_failed. */
+export class ExamForkError extends Error {
+  constructor() {
+    super('The examiner could not fork your memory. Give it a moment and start the exam again.');
+    this.name = 'ExamForkError';
+  }
+}
+
 const noopLogger: WorkspaceLogger = { info: () => {}, warn: () => {} };
 
 const DEFAULT_SWEEP_INTERVAL_MS = 30_000;
@@ -124,12 +132,21 @@ export class ExamService {
 
     const examId = randomUUID();
     const config: ExamConfig = { durationMin: opts.durationMin, targeting };
-    const thread = await this.threads.forkForExam(parent, {
-      examId,
-      trackSlug: opts.trackSlug,
-      durationMin: opts.durationMin,
-      targeting,
-    });
+    let thread;
+    try {
+      thread = await this.threads.forkForExam(parent, {
+        examId,
+        trackSlug: opts.trackSlug,
+        durationMin: opts.durationMin,
+        targeting,
+      });
+    } catch (err) {
+      // Protocol-level fork failures (codex down, rollout issues) are
+      // transient infrastructure, not caller mistakes — surface a clean 503
+      // instead of a raw 500 (no Exam row exists yet, so nothing dangles).
+      this.logger.warn({ err, userId, trackSlug: opts.trackSlug }, 'exam thread fork failed');
+      throw new ExamForkError();
+    }
     await this.prisma.exam.create({
       data: {
         id: examId,
@@ -341,8 +358,11 @@ export class ExamService {
       ...(readinessBefore !== undefined ? { readinessBefore } : {}),
     };
 
-    await this.prisma.exam.update({
-      where: { id: exam.id },
+    // Atomic in_progress → submitted: submit() and the sweep can race at the
+    // deadline boundary — whichever loses this conditional update must NOT
+    // start a second grading turn (double file updates, double spend).
+    const transition = await this.prisma.exam.updateMany({
+      where: { id: exam.id, status: 'in_progress' },
       data: {
         status: 'submitted',
         submittedAt: new Date(),
@@ -350,6 +370,10 @@ export class ExamService {
         config: newConfig as Prisma.InputJsonValue,
       },
     });
+    if (transition.count === 0) {
+      this.logger.info({ examId: exam.id }, 'exam already submitted by a concurrent path — skipping');
+      return;
+    }
     await this.startGrading({ ...exam, config: newConfig as Prisma.JsonValue }, answers, autoSubmitted);
   }
 

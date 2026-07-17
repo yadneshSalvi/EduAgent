@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ExamQuestions, ExamResult, ThreadSummary, TimelineEntry } from '@eduagent/shared';
+import type { ExamQuestions, ExamResult, TimelineEntry } from '@eduagent/shared';
 import type { KeyValueStore } from './workbench';
 import {
   autosaveDue,
@@ -19,7 +19,6 @@ import {
   msRemaining,
   pollIntervalMs,
   readinessSweep,
-  resolveExamThreadId,
   saveExamAnswersLocal,
   saveExamFlags,
   timerTone,
@@ -176,39 +175,6 @@ describe('local persistence', () => {
     store.setItem('eduagent:exam-flags:e1', '"nope"');
     expect(loadExamAnswers('e1', store)).toBeNull();
     expect(loadExamFlags('e1', store)).toEqual([]);
-  });
-});
-
-describe('resolveExamThreadId', () => {
-  const thread = (over: Partial<ThreadSummary>): ThreadSummary => ({
-    id: 't-x',
-    mode: 'exam',
-    topicSlug: null,
-    trackSlug: 'cs-interviews',
-    title: 'Mock exam — cs-interviews',
-    status: 'active',
-    forkedFromId: 't-parent',
-    createdAt: '2026-07-17T10:00:00.000Z',
-    lastActiveAt: '2026-07-17T10:00:00.000Z',
-    ...over,
-  });
-  const exam = { trackSlug: 'cs-interviews', createdAt: '2026-07-17T10:00:01.000Z' };
-
-  it('picks the exam-mode thread created closest to the exam row', () => {
-    const threads = [
-      thread({ id: 't-new', createdAt: '2026-07-17T10:00:00.500Z' }),
-      thread({ id: 't-old', createdAt: '2026-07-17T09:30:00.000Z' }),
-    ];
-    expect(resolveExamThreadId(threads, exam)).toBe('t-new');
-  });
-
-  it('ignores other tracks, other modes, and far-away threads', () => {
-    const threads = [
-      thread({ id: 't-track', trackSlug: 'sql' }),
-      thread({ id: 't-mode', mode: 'learn' }),
-      thread({ id: 't-far', createdAt: '2026-07-17T08:00:00.000Z' }),
-    ];
-    expect(resolveExamThreadId(threads, exam)).toBeNull();
   });
 });
 

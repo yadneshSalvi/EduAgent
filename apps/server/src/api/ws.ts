@@ -64,6 +64,19 @@ export const wsRoutes: FastifyPluginAsync = async (app) => {
           socket.send(JSON.stringify({ type: 'pong' }));
           return;
         }
+        // Exam integrity (plans/06 Phase 4 task 5): exam threads take only
+        // server-started turns (generation, grading). The examiner holds the
+        // hidden tests and answer key, and no UI offers exam chat — a
+        // hand-rolled socket frame must not open a conversation with it.
+        if (thread.mode === 'exam') {
+          send(socket, {
+            type: 'turn.error',
+            threadId,
+            message: 'Exam threads do not take chat messages.',
+            retryable: false,
+          });
+          return;
+        }
         // user.message: fire-and-forget through the per-thread queue; failures
         // to even start the turn surface as a retryable turn.error.
         threads.startTurn(thread, parsed.text).catch((err: unknown) => {

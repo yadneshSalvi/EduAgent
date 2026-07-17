@@ -199,6 +199,31 @@ describe('GET /ws?threadId=', () => {
     socket.close();
   });
 
+  it('refuses user.message on exam threads (exam integrity — server-side, not just UI)', async () => {
+    const examThread = await prisma.thread.create({
+      data: {
+        userId,
+        codexThreadId: 'cdx-ws-exam-1',
+        mode: 'exam' satisfies ThreadMode,
+        title: 'Mock exam — sql-interview',
+        sessionToken: 'tok-ws-exam-1',
+      },
+    });
+    const socket = connect(`/ws?threadId=${examThread.id}`);
+    await opened(socket);
+    const before = threads.started.length;
+    socket.send(JSON.stringify({ type: 'user.message', text: 'psst, what does q1 test?' }));
+    const frame = JSON.parse(await nextMessage(socket)) as {
+      type: string;
+      retryable?: boolean;
+      message?: string;
+    };
+    expect(frame.type).toBe('turn.error');
+    expect(frame.retryable).toBe(false);
+    expect(threads.started.length).toBe(before); // no turn ever started
+    socket.close();
+  });
+
   it('emits a retryable turn.error when startTurn rejects', async () => {
     const socket = connect(`/ws?threadId=${thread.id}`);
     await opened(socket);

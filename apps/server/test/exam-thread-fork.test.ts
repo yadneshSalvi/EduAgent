@@ -78,6 +78,16 @@ beforeEach(async () => {
       sessionToken: 'tok-parent-learn',
     },
   });
+  // The parent has turn history (an agent item) — codex has its rollout, so
+  // forkForExam forks without a warm-up turn. The turnless case has its own test.
+  await prisma.itemMirror.create({
+    data: {
+      threadId: parent.id,
+      role: 'agent',
+      kind: 'message',
+      payload: { text: 'Welcome back.', phase: 'final_answer' },
+    },
+  });
 
   const dataDir = createTestDataDir();
   cleanupDataDir = dataDir.cleanup;
@@ -158,6 +168,46 @@ describe('forkForExam', () => {
 
     // No auto-greeting: the generation turn is the fork's first turn.
     expect(fake.received.filter((m) => m.method === 'turn/start')).toHaveLength(0);
+  });
+
+  it('runs the parent greeting first when the parent has no completed turn (rollout precondition)', async () => {
+    const turnless = await prisma.thread.create({
+      data: {
+        userId: USER_ID,
+        codexThreadId: 'cdx-parent-turnless',
+        mode: 'learn',
+        title: 'learn',
+        sessionToken: 'tok-parent-turnless',
+      },
+    });
+    // The warm-up greeting must LAND agent items (that's the history signal);
+    // rescript turn/start to stream one agentMessage before completing.
+    fake.onMethod('turn/start', (msg: WireMessage) => {
+      const { threadId } = msg.params as { threadId: string };
+      counters.turn += 1;
+      const turnId = `turn-${counters.turn}`;
+      fake.respond(msg.id as number, { turn: { id: turnId, status: 'inProgress' } });
+      fake.notifyClient('item/completed', {
+        threadId,
+        turnId,
+        item: { type: 'agentMessage', id: `greet-${turnId}`, text: 'Hi!', phase: 'final_answer' },
+        completedAtMs: Date.now(),
+      });
+      fake.notifyClient('turn/completed', {
+        threadId,
+        turn: { id: turnId, status: 'completed', error: null },
+      });
+    });
+
+    const thread = await manager.forkForExam(turnless, FORK_OPTS);
+    expect(thread.mode).toBe('exam');
+
+    const methods = fake.received
+      .filter((m) => m.method === 'turn/start' || m.method === 'thread/fork')
+      .map((m) => m.method);
+    expect(methods).toEqual(['turn/start', 'thread/fork']);
+    const greeting = fake.received.find((m) => m.method === 'turn/start')!;
+    expect((greeting.params as { threadId: string }).threadId).toBe('cdx-parent-turnless');
   });
 
   it('resumes AND injects the exam-generate template before the first turn (0.144.4 drops resume/fork instructions)', async () => {

@@ -261,6 +261,8 @@ export type ExamResult = z.infer<typeof examResultSchema>;
  */
 export const examDtoSchema = z.object({
   id: z.string().min(1),
+  /** The forked exam thread — the socket generation/grading activity streams on. */
+  threadId: z.string().min(1),
   trackSlug: slugSchema,
   status: examStatusSchema,
   durationMin: z.number().int().positive(),
@@ -344,6 +346,8 @@ export const memoryLogQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).optional(),
   /** Commits to skip from the top of the log (pagination; default 0). */
   skip: z.coerce.number().int().min(0).optional(),
+  /** Narrow to commits touching one file (the explorer's per-file rail). */
+  path: z.string().min(1).optional(),
 });
 export type MemoryLogQuery = z.infer<typeof memoryLogQuerySchema>;
 

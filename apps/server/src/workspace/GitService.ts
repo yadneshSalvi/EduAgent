@@ -137,13 +137,15 @@ export class GitService {
   /**
    * Commits newest-first. `from` bounds the range as `from..HEAD` (exclusive
    * of `from` itself) — pass the sha captured before a turn to get the turn's
-   * commits. Empty repo → [].
+   * commits. `path` narrows to commits touching one file (`--follow`, so the
+   * memory explorer's per-file rail survives renames). Empty repo → [].
    */
-  async log(opts: { from?: string; maxCount?: number } = {}): Promise<GitCommitInfo[]> {
+  async log(opts: { from?: string; maxCount?: number; path?: string } = {}): Promise<GitCommitInfo[]> {
     try {
       const result = await this.git.log({
         ...(opts.from ? { from: opts.from, to: 'HEAD', symmetric: false } : {}),
         ...(opts.maxCount ? { maxCount: opts.maxCount } : {}),
+        ...(opts.path ? { file: opts.path } : {}),
       });
       return result.all.map((entry) => ({
         sha: entry.hash,

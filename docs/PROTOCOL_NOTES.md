@@ -260,3 +260,16 @@ probe (`thread/inject_items` fork + rotation, gpt-5.4-mini, PASS).
   onboarding→learn instruction "rotation on next resume" (§ top of ThreadManager) has never
   actually reached the model on 0.144.4 — revisit if onboarding→learn behavior drift is ever
   observed (the session token is identical across that rotation, so tool auth never breaks).
+
+## Phase 4 review addendum — `thread/fork` needs a parent ROLLOUT (turnless parents can't fork)
+
+- Codex writes a thread's rollout file only once a turn has RUN on it — `thread/start` alone
+  creates no rollout. `thread/fork {threadId}` reads the parent's rollout, so forking a thread
+  that has never run a turn fails with **"no rollout found"** (observed live in Phase 4B: a
+  fresh/seeded user's first `POST /api/exams`, whose just-created learn thread's fire-and-forget
+  greeting hadn't run yet, 500'd here).
+- **EduAgent wiring:** `ThreadManager.forkForExam` first guarantees the parent has a completed
+  turn — drain the workspace turn queue, then run an awaited `[session-start]` greeting turn if
+  the parent still has no agent-role ItemMirror rows (their presence is the persistent
+  "has a rollout" signal). Verified live (2026-07-17): fixture workspace + zero threads →
+  `POST /api/exams` → greeting on the fresh learn thread → fork OK → draft exam row.

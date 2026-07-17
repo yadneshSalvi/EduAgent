@@ -244,6 +244,7 @@ export class ThreadManager implements ExamThreadService {
    * generation turn is the fork's first turn.
    */
   async forkForExam(parent: Thread, opts: ExamForkOptions): Promise<Thread> {
+    await this.ensureParentTurnHistory(parent);
     const workspace = await this.workspaces.ensureWorkspace(parent.userId);
     const sessionToken = randomUUID();
     const forked = await this.client.forkThread({
@@ -284,6 +285,35 @@ export class ThreadManager implements ExamThreadService {
 
   invalidateInstructions(thread: Thread): void {
     this.resumedThreads.delete(thread.codexThreadId);
+  }
+
+  /**
+   * codex only writes a thread's rollout once a turn has run, and
+   * `thread/fork` reads the parent's rollout — forking a turnless thread
+   * fails with "no rollout found" (observed live: a fresh/seeded user's
+   * first exam, whose learn-thread greeting hadn't run yet). Guarantee the
+   * parent has at least one completed turn: wait out anything queued (the
+   * fire-and-forget greeting), then run an awaited greeting turn if the
+   * thread is still turnless. Completed turns always leave agent-role
+   * ItemMirror rows, so their presence is the persistent "has a rollout"
+   * signal.
+   */
+  private async ensureParentTurnHistory(parent: Thread): Promise<void> {
+    const hasTurnHistory = async (): Promise<boolean> =>
+      (await this.prisma.itemMirror.count({ where: { threadId: parent.id, role: 'agent' } })) > 0;
+    if (await hasTurnHistory()) return;
+    await this.turnQueues.get(parent.userId)?.catch(() => {});
+    if (await hasTurnHistory()) return;
+    this.log.info(
+      { threadId: parent.id },
+      'exam fork parent has no completed turn — running its greeting first',
+    );
+    await this.enqueueTurn(parent, GREETING_INPUT, 'system');
+    if (!(await hasTurnHistory())) {
+      throw new Error(
+        `exam fork parent ${parent.id} still has no completed turn (its greeting failed)`,
+      );
+    }
   }
 
   /**
@@ -787,7 +817,13 @@ export class ThreadManager implements ExamThreadService {
       });
     }
 
-    const row = mirrorRowFor(item);
+    // Exam integrity: the examiner's shell traffic (heredoc-written hidden
+    // tests, test-run output) must not sit readable in ItemMirror mid-exam —
+    // GET /api/threads/:id/items serves it to the exam-taker. Mirror exam
+    // exec rows with only the 80-char label the live activity chip already
+    // showed. (The web never renders mirrored exec rows; this is belt and
+    // suspenders for the raw API.)
+    const row = mirrorRowFor(item, { redactExecDetail: thread.mode === 'exam' });
     if (!row) return;
     void this.enqueue(this.mirrorQueues, thread.id, async () => {
       await this.mirrorWrite(thread.id, {
@@ -892,6 +928,7 @@ function itemFailed(item: CodexItem): boolean {
  */
 function mirrorRowFor(
   item: CodexItem,
+  opts: { redactExecDetail?: boolean } = {},
 ): { role: string; kind: string; payload: Prisma.InputJsonValue } | null {
   switch (item.type) {
     case 'agentMessage':
@@ -907,14 +944,24 @@ function mirrorRowFor(
       return {
         role: 'agent',
         kind: 'exec',
-        payload: {
-          command: item.command,
-          status: item.status,
-          exitCode: item.exitCode,
-          durationMs: item.durationMs,
-          aggregatedOutput:
-            item.aggregatedOutput === null ? null : clip(item.aggregatedOutput, EXEC_OUTPUT_MAX),
-        },
+        payload: opts.redactExecDetail
+          ? {
+              command: clip(item.command, ACTIVITY_LABEL_MAX),
+              status: item.status,
+              exitCode: item.exitCode,
+              durationMs: item.durationMs,
+              aggregatedOutput: null,
+            }
+          : {
+              command: item.command,
+              status: item.status,
+              exitCode: item.exitCode,
+              durationMs: item.durationMs,
+              aggregatedOutput:
+                item.aggregatedOutput === null
+                  ? null
+                  : clip(item.aggregatedOutput, EXEC_OUTPUT_MAX),
+            },
       };
     case 'mcpToolCall':
       return {

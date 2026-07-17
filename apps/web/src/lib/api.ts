@@ -366,12 +366,13 @@ export function getMemoryFile(
 }
 
 export function getMemoryLog(
-  options: { limit?: number; skip?: number } = {},
+  options: { limit?: number; skip?: number; path?: string } = {},
   signal?: AbortSignal,
 ): Promise<MemoryLogResponse> {
   const query = new URLSearchParams();
   if (options.limit !== undefined) query.set('limit', String(options.limit));
   if (options.skip !== undefined) query.set('skip', String(options.skip));
+  if (options.path !== undefined) query.set('path', options.path);
   const suffix = query.size > 0 ? `?${query}` : '';
   return apiFetch(`/api/memory/log${suffix}`, { schema: memoryLogResponseSchema, signal });
 }

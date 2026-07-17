@@ -8,6 +8,7 @@ import {
   DeadlinePassedError,
   EXAM_GRACE_MS,
   EXAM_IGNORE_PATTERN,
+  ExamForkError,
   ExamService,
   ExamStateError,
   examDeadline,
@@ -449,5 +450,39 @@ describe('sweep', () => {
     const gradingTurn = threads.systemTurns.at(-1)!;
     expect(gradingTurn.text).toContain('time expired');
     expect(gradingTurn.text).toContain('submission.sql'); // autosaved q1 written to disk
+  });
+
+  it('a submit racing the sweep at the deadline starts exactly one grading turn', async () => {
+    const examId = await createReadyExam();
+    await service.start(USER_ID, examId);
+    await service.autosave(USER_ID, examId, { q1: 'autosaved' });
+    await prisma.exam.update({
+      where: { id: examId },
+      data: { startedAt: new Date(Date.now() - 31 * 60_000 - EXAM_GRACE_MS) },
+    });
+
+    const before = threads.systemTurns.length;
+    // Both paths read `in_progress` before either lands the transition — the
+    // conditional update must let exactly one of them start grading.
+    const [submitResult] = await Promise.allSettled([
+      service.submit(USER_ID, examId, { q1: 'late body (ignored)' }),
+      service.sweepExpired(),
+    ]);
+    await settle();
+
+    expect(submitResult.status).toBe('fulfilled');
+    expect((await prisma.exam.findUniqueOrThrow({ where: { id: examId } })).status).toBe('submitted');
+    const gradingTurns = threads.systemTurns.slice(before).filter((t) => t.text.includes(examId));
+    expect(gradingTurns).toHaveLength(1);
+  });
+});
+
+describe('fork failure', () => {
+  it('maps a failing thread fork to ExamForkError and leaves no Exam row behind', async () => {
+    threads.forkForExam = () => Promise.reject(new Error('no rollout found'));
+    await expect(service.create(USER_ID, { trackSlug: TRACK, durationMin: 30 })).rejects.toThrow(
+      ExamForkError,
+    );
+    expect(await prisma.exam.count({ where: { userId: USER_ID } })).toBe(0);
   });
 });

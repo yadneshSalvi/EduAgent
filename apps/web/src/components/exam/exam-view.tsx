@@ -8,8 +8,8 @@ import type { ExamStatus } from '@eduagent/shared';
 import { useUserSocketEvents } from '@/components/memory/memory-commit-provider';
 import { ErrorState } from '@/components/shared/error-state';
 import { Badge } from '@/components/ui/badge';
-import { ApiError, getExam, listThreads } from '@/lib/api';
-import { EXAM_STATUS_LABEL, pollIntervalMs, resolveExamThreadId } from '@/lib/exam';
+import { ApiError, getExam } from '@/lib/api';
+import { EXAM_STATUS_LABEL, pollIntervalMs } from '@/lib/exam';
 import { ExamReady } from './exam-ready';
 import { ExamResults } from './exam-results';
 import { ExamRoom } from './exam-room';
@@ -46,19 +46,8 @@ export function ExamView({ examId }: { examId: string }) {
   });
   const exam = examQuery.data;
 
-  // The DTO doesn't name its forked thread (contract gap) — resolve it from
-  // the exam-mode thread list to attach generation/grading activity streams.
-  const needsThread = exam !== undefined && (exam.status === 'draft' || exam.status === 'submitted');
-  const threadQuery = useQuery({
-    queryKey: ['exams', examId, 'thread'],
-    enabled: needsThread,
-    staleTime: Infinity,
-    queryFn: async ({ signal }) => {
-      const { threads } = await listThreads('exam', signal);
-      return exam ? resolveExamThreadId(threads, exam) : null;
-    },
-  });
-  const threadId = threadQuery.data ?? null;
+  // The forked exam thread — generation/grading activity streams on its socket.
+  const threadId = exam?.threadId ?? null;
 
   // Fast path: exam.created / exam.graded / the exam thread's turn lifecycle.
   useUserSocketEvents((event) => {

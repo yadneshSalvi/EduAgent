@@ -5,16 +5,15 @@ import type {
   ExamQuestions,
   ExamResult,
   ExamStatus,
-  ThreadSummary,
   TimelineEntry,
 } from '@eduagent/shared';
 import type { KeyValueStore } from './workbench';
 
 /**
  * Exam pure helpers (plans/04 §6): server-authoritative deadline math, the
- * question palette derivation, autosave scheduling, exam-thread resolution,
- * and the results-view mapping. All pure and injected so vitest covers them
- * without a DOM or a clock.
+ * question palette derivation, autosave scheduling, and the results-view
+ * mapping. All pure and injected so vitest covers them without a DOM or a
+ * clock.
  */
 
 // ---------------------------------------------------------------------------
@@ -240,31 +239,6 @@ export function mergeAnswers(
   local: ExamAnswers | null,
 ): ExamAnswers {
   return { ...(server ?? {}), ...(local ?? {}) };
-}
-
-// ---------------------------------------------------------------------------
-// Exam-thread resolution. The ExamDto doesn't carry its threadId (contract
-// gap), but generation/grading activity streams on the exam THREAD's socket
-// and reconcile turn.errors name that threadId — so we resolve it from
-// GET /api/threads?mode=exam: same track, created closest to the exam row
-// (forkForExam creates the thread immediately before the exam, plans/03 §3.5).
-// ---------------------------------------------------------------------------
-
-const THREAD_MATCH_TOLERANCE_MS = 10 * 60_000;
-
-export function resolveExamThreadId(
-  threads: ThreadSummary[],
-  exam: Pick<ExamDto, 'trackSlug' | 'createdAt'>,
-): string | null {
-  const examCreated = new Date(exam.createdAt).getTime();
-  let best: { id: string; distance: number } | null = null;
-  for (const thread of threads) {
-    if (thread.mode !== 'exam' || thread.trackSlug !== exam.trackSlug) continue;
-    const distance = Math.abs(new Date(thread.createdAt).getTime() - examCreated);
-    if (distance > THREAD_MATCH_TOLERANCE_MS) continue;
-    if (best === null || distance < best.distance) best = { id: thread.id, distance };
-  }
-  return best?.id ?? null;
 }
 
 // ---------------------------------------------------------------------------

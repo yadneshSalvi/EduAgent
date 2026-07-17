@@ -215,6 +215,24 @@ describe('GET /api/memory/log', () => {
     expect(commits[5]!.deltas).toEqual([{ concept: 'select-basics', from: 0.55, to: 0.8 }]);
   });
 
+  it('narrows to one file with path (the explorer per-file rail)', async () => {
+    const profile = memoryLogResponseSchema.parse(
+      (await get('/api/memory/log?path=profile.md')).json(),
+    );
+    expect(profile.commits).toHaveLength(1);
+    expect(profile.commits[0]!.sha).toBe(refs.shas[0]);
+
+    const mastery = memoryLogResponseSchema.parse(
+      (await get(`/api/memory/log?path=${encodeURIComponent('topics/sql/mastery.yaml')}`)).json(),
+    );
+    expect(mastery.commits).toHaveLength(5);
+    expect(mastery.commits[0]!.type).toBe('learn');
+
+    expect(
+      (await get(`/api/memory/log?path=${encodeURIComponent('../outside')}`)).statusCode,
+    ).toBe(400);
+  });
+
   it('paginates with limit + skip', async () => {
     const page1 = memoryLogResponseSchema.parse((await get('/api/memory/log?limit=2')).json());
     const page2 = memoryLogResponseSchema.parse(
@@ -261,6 +279,16 @@ describe('GET /api/memory/diff', () => {
 
   it('404s on an unknown sha', async () => {
     expect((await get('/api/memory/diff?from=deadbeef&to=HEAD')).statusCode).toBe(404);
+  });
+
+  it('accepts the empty-tree sha (the web root-commit diff idiom)', async () => {
+    const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+    const res = await get(`/api/memory/diff?from=${emptyTree}&to=${refs.shas[0]}`);
+    expect(res.statusCode).toBe(200);
+    const body = memoryDiffResponseSchema.parse(res.json());
+    expect(body.stats.filesChanged).toBe(5); // the root commit's whole tree
+    expect(body.diff).toContain('profile.md');
+    expect(body.stats.deletions).toBe(0);
   });
 });
 
