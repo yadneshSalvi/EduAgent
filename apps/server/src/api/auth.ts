@@ -15,8 +15,14 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!authed) return sendError(reply, 401, 'unauthenticated');
     const user = await prisma.user.findUnique({ where: { id: authed.userId } });
     if (!user) return sendError(reply, 401, 'unauthenticated');
-    return toMeResponse(user);
+    return toMeResponse(user, await isOnboarded(user.id));
   });
+
+  /** onboarded = the workspace has a COMMITTED profile.md (plans/03 §7). */
+  async function isOnboarded(userId: string): Promise<boolean> {
+    if (!app.workspaces) return false;
+    return app.workspaces.hasCommittedProfile(userId);
+  }
 
   app.post('/auth/local-login', async (req, reply) => {
     if (config.authMode !== 'local') {
@@ -50,7 +56,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       secure: config.nodeEnv === 'production',
       maxAge: 60 * 60 * 24 * 30,
     });
-    return toMeResponse(user);
+    return toMeResponse(user, await isOnboarded(user.id));
   });
 
   app.post('/auth/demo-login', async (req, reply) => {
@@ -82,15 +88,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   });
 };
 
-function toMeResponse(user: User): MeResponse {
+function toMeResponse(user: User, onboarded: boolean): MeResponse {
   return {
     id: user.id,
     handle: user.handle,
     displayName: user.displayName,
     timezone: user.timezone,
-    // Placeholder until WorkspaceManager lands (Phase 1): becomes "workspace
-    // has a committed profile.md" (plans/03 §7).
-    onboarded: false,
+    onboarded,
   };
 }
 

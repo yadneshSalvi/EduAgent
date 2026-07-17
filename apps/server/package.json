@@ -21,9 +21,13 @@
     "@prisma/client": "^6.19.0",
     "dotenv": "^17.2.0",
     "fastify": "^5.6.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^5.2.1",
+    "simple-git": "^3.36.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.0",
     "pino-pretty": "^13.0.0",

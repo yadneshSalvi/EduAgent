@@ -9,9 +9,11 @@ import {
   LayoutDashboard,
   RotateCcw,
   Timer,
+  UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { useMe } from '@/hooks/use-me';
 import { PLACEHOLDER_DUE_COUNT, PLACEHOLDER_USER } from '@/lib/placeholder-data';
 import { cn } from '@/lib/utils';
 
@@ -76,36 +78,57 @@ export function AppSidebar() {
         })}
       </nav>
 
-      <div className="border-t p-2 lg:p-3">
-        <Link
-          href="/app/settings"
-          title="Settings"
-          className="flex items-center justify-center gap-3 rounded-md p-2 transition-colors duration-150 hover:bg-surface-2 lg:justify-start"
+      <UserChip />
+    </aside>
+  );
+}
+
+/**
+ * The user chip: live from GET /auth/me. 401 / unreachable host render the
+ * signed-out treatment. Streak stays placeholder until /api/dashboard
+ * (Phase 2) supplies it.
+ */
+function UserChip() {
+  const { data: me, isPending } = useMe();
+  const name = me?.displayName ?? null;
+
+  return (
+    <div className="border-t p-2 lg:p-3">
+      <Link
+        href="/app/settings"
+        title="Settings"
+        className="flex items-center justify-center gap-3 rounded-md p-2 transition-colors duration-150 hover:bg-surface-2 lg:justify-start"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            'flex size-8 shrink-0 items-center justify-center rounded-full',
+            name
+              ? 'bg-accent-soft text-body-sm font-semibold text-primary'
+              : 'bg-surface-2 text-muted-foreground',
+          )}
         >
-          <span
-            aria-hidden
-            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-body-sm font-semibold text-primary"
-          >
-            {PLACEHOLDER_USER.name.charAt(0)}
+          {name ? name.charAt(0).toUpperCase() : <UserRound className="size-4" />}
+        </span>
+        <span className="hidden min-w-0 flex-1 flex-col lg:flex">
+          <span className={cn('truncate text-body-sm font-medium', isPending && 'opacity-0')}>
+            {name ?? 'Not signed in'}
           </span>
-          <span className="hidden min-w-0 flex-1 flex-col lg:flex">
-            <span className="truncate text-body-sm font-medium">{PLACEHOLDER_USER.name}</span>
-            <span className="text-caption text-muted-foreground">
-              {PLACEHOLDER_USER.streakDays > 0
-                ? `day ${PLACEHOLDER_USER.streakDays} streak`
-                : 'no streak yet'}
-            </span>
-          </span>
-          {PLACEHOLDER_USER.streakDays > 0 ? (
-            <span className="hidden items-center gap-1 text-warn lg:flex">
-              <Flame className="size-4" aria-hidden />
-              <span className="numeric text-caption font-semibold">
-                {PLACEHOLDER_USER.streakDays}
-              </span>
+          {me ? (
+            <span className="truncate font-mono text-caption text-muted-foreground">
+              @{me.handle}
             </span>
           ) : null}
-        </Link>
-      </div>
-    </aside>
+        </span>
+        {PLACEHOLDER_USER.streakDays > 0 ? (
+          <span className="hidden items-center gap-1 text-warn lg:flex">
+            <Flame className="size-4" aria-hidden />
+            <span className="numeric text-caption font-semibold">
+              {PLACEHOLDER_USER.streakDays}
+            </span>
+          </span>
+        ) : null}
+      </Link>
+    </div>
   );
 }

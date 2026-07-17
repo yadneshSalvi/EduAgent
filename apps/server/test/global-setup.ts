@@ -2,6 +2,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { serverDir, templateDbPath, testDbDir } from './helpers/test-db.js';
 
+// Workers fork after global-setup: publish this invocation's db dir so every
+// test file resolves the SAME per-run dir (worker pids differ from ours).
+process.env.VITEST_DB_DIR = testDbDir;
+
 function prisma(args: string[], extraEnv: Record<string, string> = {}): void {
   try {
     execFileSync('pnpm', ['exec', 'prisma', ...args], {
@@ -19,6 +23,8 @@ function prisma(args: string[], extraEnv: Record<string, string> = {}): void {
 }
 
 export default function setup(): () => void {
+  // Only this invocation's subdir — a concurrent vitest run (e.g. the gated
+  // E2E) has its own, and deleting its open SQLite files would poison it.
   fs.rmSync(testDbDir, { recursive: true, force: true });
   fs.mkdirSync(testDbDir, { recursive: true });
   // Idempotent; keeps `pnpm test` green on a fresh clone without db:setup.

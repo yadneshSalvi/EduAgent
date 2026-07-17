@@ -29,6 +29,9 @@ const envSchema = z.object({
   // Exact id verified by the Phase 0 spike (docs/PROTOCOL_NOTES.md): there is
   // no bare "gpt-5.6" — the model id is "gpt-5.6-sol".
   CODEX_MODEL: z.string().default('gpt-5.6-sol'),
+  // Optional dedicated codex home (auth.json via `codex login --with-api-key`,
+  // PROTOCOL_NOTES §10). Unset = the child inherits the ambient ~/.codex.
+  CODEX_HOME: z.string().optional(),
   SESSION_SECRET: z.string().min(16, 'must be at least 16 characters').default(DEV_SESSION_SECRET),
   ACCESS_CODE: z.string().optional(),
   CLERK_SECRET_KEY: z.string().optional(),
@@ -52,6 +55,8 @@ export interface AppConfig {
   databaseUrl: string;
   codexBin: string;
   codexModel: string;
+  /** Absolute path when set; CODEX_HOME is resolved against the repo root. */
+  codexHome?: string;
   sessionSecret: string;
   accessCode?: string;
   clerkSecretKey?: string;
@@ -94,6 +99,7 @@ export function loadConfig(env?: Record<string, string | undefined>): AppConfig 
     databaseUrl: e.DATABASE_URL ?? `file:${path.join(dataDir, 'eduagent.db')}`,
     codexBin: e.CODEX_BIN,
     codexModel: e.CODEX_MODEL,
+    ...(e.CODEX_HOME !== undefined ? { codexHome: path.resolve(repoRoot, e.CODEX_HOME) } : {}),
     sessionSecret: e.SESSION_SECRET,
     accessCode: e.ACCESS_CODE,
     clerkSecretKey: e.CLERK_SECRET_KEY,
@@ -129,6 +135,7 @@ export function configSummary(config: AppConfig) {
     databaseUrl: config.databaseUrl,
     codexBin: config.codexBin,
     codexModel: config.codexModel,
+    codexHome: config.codexHome,
     corsOrigins: config.corsOrigins,
     clerkSecretKeySet: config.clerkSecretKey !== undefined,
     clerkPublishableKeySet: config.clerkPublishableKey !== undefined,

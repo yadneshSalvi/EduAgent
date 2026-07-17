@@ -1,0 +1,14 @@
+/**
+ * Prompt budgets (plans/03 §6.4). The estimator is the standard ~4 chars per
+ * token heuristic for English/markdown — good enough for budget tests; we
+ * never bill by it.
+ */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/** Hard cap for the per-turn state digest (plans/03 §6.4: "digest ≤ ~600 tokens"). */
+export const STATE_DIGEST_TOKEN_BUDGET = 600;
+
+/** Budget for thread-level developerInstructions — skills carry the bulk, these stay lean. */
+export const MODE_INSTRUCTIONS_TOKEN_BUDGET = 700;

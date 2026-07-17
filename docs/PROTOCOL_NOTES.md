@@ -150,6 +150,7 @@ codex app-server \
 ## 10. Headless / non-interactive auth (for plans/08 §3)
 
 - **`OPENAI_API_KEY` as an env var on the app-server process does NOT authenticate it** on 0.144.4. Turns fail (`turn.status:"failed"`) with `codexErrorInfo:{responseStreamDisconnected:{httpStatusCode:401}}` after retries, and a `warning` notification shows the WS 401. `account/read` under env-only shows `{account:null, requiresOpenaiAuth:true}` — use that as the healthcheck probe.
+- **Addendum (Phase 1A, verified on the real wire):** under WORKING API-key auth (auth.json via `codex login --with-api-key`), `account/read` returns `{account:{type:"apiKey"}, requiresOpenaiAuth:true}` — `requiresOpenaiAuth` describes the provider requirement, NOT missing auth. The unauthenticated signal is strictly `account === null`. AppServerClient.healthProbe() keys off `account !== null`.
 - **The working incantation** (verified — the entire spike runs on it, in an isolated `CODEX_HOME`, never touching `~/.codex`):
 
 ```sh
@@ -208,3 +209,10 @@ With `effort:"medium", summary:"detailed"` on `turn/start`, the model emits **`i
 | 10 turn/interrupt mid-stream | PASS ×2 | fixtures 10, §4 |
 | 11 headless API-key auth | PASS ×2 | fixtures 00/11, §10 |
 | 12 whole script green twice, no stray processes | PASS | run logs; teardown step verifies PIDs |
+
+## Phase 1 addenda (live E2E findings, codex-cli 0.144.4 — rollout-evidence in data/spike-workspace/codex-home/sessions/)
+
+- **`workspaceWrite` marks the workspace's top-level `.git` READ-ONLY.** Agent-run `git commit` fails with `fatal: Unable to create .git/index.lock: Operation not permitted` — on every turn, always. Models still write files correctly; variance is only in post-failure cleanup (some delete their work, leaving a clean tree that defeats dirty-tree safety nets). **Workaround (validated on macOS Seatbelt): pass `writableRoots: ["<workspace>/.git"]` in the turn-level sandboxPolicy** — a writable root of `.git` itself has no top-level `.git` child, so the exclusion doesn't apply. ThreadManager.runTurn does this on every turn. ⚠️ Must be RE-VERIFIED under Linux Landlock during the Phase 5 deploy spike (plans/08 §4).
+- **Security tradeoff accepted (Phase 1 gate item):** with `.git` writable, the agent can rewrite its own memory-repo history (learning ledger not tamper-evident against prompt injection). Future hardening options: server-side commit proxy, post-turn `git fsck`/reflog audit.
+- **`command/exec` (the client-side app-server method) executes OUTSIDE the sandbox.** Nothing in the product uses it; never reach for it assuming seatbelt protection. Agent-initiated commands inside turns ARE sandboxed.
+- Under working API-key auth, `account/read` → `{account:{type:"apiKey"}, requiresOpenaiAuth:true}`; unauthenticated is strictly `account === null` (see §10 addendum above).

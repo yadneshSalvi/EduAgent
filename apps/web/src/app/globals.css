@@ -170,3 +170,170 @@
 @utility numeric {
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------------------------------------------------------------------
+ * Chat prose (tutor room, plans/04 §3) — scholar voice: 1.6 line-height,
+ * calm spacing; code speaks terminal via .chat-codeblock below.
+ * ------------------------------------------------------------------------- */
+.chat-prose {
+  font-size: var(--text-body);
+  line-height: 1.6;
+}
+.chat-prose > * + * {
+  margin-top: 0.75rem;
+}
+.chat-prose h1,
+.chat-prose h2,
+.chat-prose h3,
+.chat-prose h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 1.25rem;
+}
+.chat-prose h1 {
+  font-size: var(--text-h3);
+}
+.chat-prose h2 {
+  font-size: var(--text-h4);
+}
+.chat-prose h3,
+.chat-prose h4 {
+  font-size: var(--text-lead);
+}
+.chat-prose ul,
+.chat-prose ol {
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.chat-prose ul {
+  list-style: disc;
+}
+.chat-prose ol {
+  list-style: decimal;
+}
+.chat-prose li::marker {
+  color: var(--text-muted);
+}
+.chat-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.chat-prose blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.875rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.chat-prose strong {
+  font-weight: 600;
+}
+.chat-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
+  padding: 0.1em 0.35em;
+}
+.chat-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body-sm);
+}
+.chat-prose th,
+.chat-prose td {
+  border: 1px solid var(--border);
+  padding: 0.375rem 0.625rem;
+  text-align: left;
+}
+.chat-prose th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+/* Fenced code — terminal voice. Overrides shiki's baked-in page background so
+   blocks sit on our surface token. */
+.chat-codeblock {
+  margin-top: 0.75rem;
+}
+.chat-codeblock pre {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 0.875rem 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.chat-codeblock pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Streaming caret (05 §5: the only looping animation besides fading-pulse).
+   Drawn at the end of the last paragraph of the in-flight message. */
+.streaming-md .chat-prose > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: caret-blink 1s steps(2, jump-none) infinite;
+}
+@keyframes caret-blink {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Activity-chip 3-dot pulse (05 §6.3). */
+.chip-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+}
+.chip-dots span {
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.35;
+  animation: chip-dot 1.2s ease-in-out infinite;
+}
+.chip-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.chip-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes chip-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion (05 §9): loops stop; everything settles to steady state. */
+@media (prefers-reduced-motion: reduce) {
+  .streaming-md .chat-prose > p:last-child::after,
+  .chip-dots span {
+    animation: none;
+  }
+}

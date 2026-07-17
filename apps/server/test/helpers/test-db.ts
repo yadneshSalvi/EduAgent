@@ -7,8 +7,17 @@ const helpersDir = path.dirname(fileURLToPath(import.meta.url));
 export const serverDir = path.resolve(helpersDir, '..', '..');
 export const repoRoot = path.resolve(serverDir, '..', '..');
 
-/** Throwaway SQLite files live under gitignored data/; global-setup wipes the dir. */
-export const testDbDir = path.join(repoRoot, 'data', 'test-dbs');
+/**
+ * Throwaway SQLite files live under gitignored data/, in a PER-INVOCATION
+ * subdir (keyed by the vitest pid via VITEST_DB_DIR from global-setup, falling
+ * back to this process). Concurrent vitest runs — e.g. unit tests while the
+ * gated E2E is in flight — must never wipe each other's live databases:
+ * SQLite reports SQLITE_READONLY_DBMOVED on every write after the file is
+ * deleted under an open connection (observed in the Phase 1 review).
+ */
+export const testDbRootDir = path.join(repoRoot, 'data', 'test-dbs');
+export const testDbDir =
+  process.env.VITEST_DB_DIR ?? path.join(testDbRootDir, `run-${process.pid}`);
 export const templateDbPath = path.join(testDbDir, 'template.db');
 
 /**

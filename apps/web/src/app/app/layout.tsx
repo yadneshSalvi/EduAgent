@@ -1,16 +1,12 @@
 import type { ReactNode } from 'react';
-import { AppSidebar } from '@/components/shared/app-sidebar';
+import { AppProviders } from './providers';
 
 /**
- * /app/* shell (plans/04 §1): left sidebar nav + content area (max-w none;
- * every page owns its scroll). Command palette, toast viewport, and the WS
- * providers land in Phase 1.
+ * /app/* root (plans/04 §1): providers only. The sidebar shell lives in the
+ * (shell) route group; /app/onboarding renders full-screen wizard chrome
+ * OUTSIDE the shell (04 §8) while still getting the query client and the
+ * memory-commit toast/drawer surface.
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex min-h-dvh">
-      <AppSidebar />
-      <main className="flex h-dvh flex-1 flex-col overflow-y-auto">{children}</main>
-    </div>
-  );
+  return <AppProviders>{children}</AppProviders>;
 }

@@ -4,10 +4,22 @@ import type { PrismaClient } from '@prisma/client';
 import { meResponseSchema } from '@eduagent/shared';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { WsGateway } from '../src/api/gateway.js';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createPrisma } from '../src/db.js';
+import type { ThreadService } from '../src/threads/index.js';
 import { createTestDbUrl } from './helpers/test-db.js';
+
+/** Auth tests only exercise connectivity; thread behavior lives in ws-gateway.test.ts. */
+const idleThreads: ThreadService = {
+  ensureThread: () => Promise.reject(new Error('not used')),
+  startTurn: () => Promise.resolve(),
+  interrupt: () => Promise.resolve(),
+  turnInFlight: () => false,
+  inFlightThreads: () => [],
+  resumeAll: () => Promise.resolve(),
+};
 
 let app: FastifyInstance;
 let prisma: PrismaClient;
@@ -21,7 +33,11 @@ beforeAll(async () => {
     DATABASE_URL: databaseUrl,
     SESSION_SECRET: 'local-test-session-secret',
   });
-  app = await buildApp({ config, prisma });
+  app = await buildApp({
+    config,
+    prisma,
+    services: { threads: idleThreads, gateway: new WsGateway() },
+  });
   await app.ready();
 });
 
@@ -107,18 +123,18 @@ describe('AUTH_MODE=local auth flow', () => {
   });
 });
 
-describe('WS /ws (local mode)', () => {
+describe('WS auth (local mode)', () => {
   let baseWsUrl: string | null = null;
-  async function wsUrl(): Promise<string> {
+  async function wsUrl(path: string): Promise<string> {
     if (baseWsUrl === null) {
       await app.listen({ port: 0, host: '127.0.0.1' });
       const { port } = app.server.address() as AddressInfo;
-      baseWsUrl = `ws://127.0.0.1:${port}/ws`;
+      baseWsUrl = `ws://127.0.0.1:${port}`;
     }
-    return baseWsUrl;
+    return `${baseWsUrl}${path}`;
   }
 
-  it('authenticates via the session cookie and echoes ping→pong (text and JSON)', async () => {
+  it('authenticates /ws/user via the session cookie and echoes ping→pong (text and JSON)', async () => {
     const login = await app.inject({
       method: 'POST',
       url: '/auth/local-login',
@@ -126,7 +142,7 @@ describe('WS /ws (local mode)', () => {
     });
     const pair = sessionCookiePair(login.headers['set-cookie']);
 
-    const socket = new WebSocket(await wsUrl(), { headers: { cookie: pair } });
+    const socket = new WebSocket(await wsUrl('/ws/user'), { headers: { cookie: pair } });
     await new Promise<void>((resolve, reject) => {
       socket.once('open', resolve);
       socket.once('error', reject);
@@ -147,11 +163,13 @@ describe('WS /ws (local mode)', () => {
     socket.close();
   });
 
-  it('closes unauthenticated connections with 4401', async () => {
-    const socket = new WebSocket(await wsUrl());
-    const code = await new Promise<number>((resolve) => {
-      socket.once('close', (closeCode) => resolve(closeCode));
-    });
-    expect(code).toBe(4401);
+  it('closes unauthenticated connections with 4401 (thread and user sockets)', async () => {
+    for (const path of ['/ws?threadId=any', '/ws/user']) {
+      const socket = new WebSocket(await wsUrl(path));
+      const code = await new Promise<number>((resolve) => {
+        socket.once('close', (closeCode) => resolve(closeCode));
+      });
+      expect(code).toBe(4401);
+    }
   });
 });

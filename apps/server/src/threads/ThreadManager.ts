@@ -1,0 +1,663 @@
+/**
+ * ThreadManager (plans/03 §3.1): owns the Thread row ⇄ codex thread mapping,
+ * serializes turns per thread, prepends the per-turn context envelope, maps
+ * codex thread events onto the shared WsEvent union for the gateway, and is
+ * the ONLY writer of ItemMirror rows.
+ *
+ * Mode note (web contract, apps/web onboarding-wizard): the web always
+ * creates `mode:"learn"` threads; a learner without a committed profile.md
+ * gets ONBOARDING developerInstructions on that thread. Instructions are
+ * rebuilt from current state on every thread/resume, so the onboarding→learn
+ * transition happens naturally after the next server or codex restart.
+ */
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import type { Prisma, PrismaClient, Thread } from '@prisma/client';
+import type { ThreadMode, WsEvent } from '@eduagent/shared';
+import type { AppServerClient, CodexLogger, ThreadEvent } from '../codex/index.js';
+import {
+  buildContextEnvelope,
+  buildLearnInstructions,
+  buildOnboardingInstructions,
+} from '../prompts/index.js';
+import { formatStateDigest } from '../workspace/index.js';
+import type { MemoryPipeline, WorkspaceManager } from '../workspace/index.js';
+
+/** Fixed input line for the auto-greeting turn run when a thread is created. */
+export const GREETING_INPUT = '[session-start]';
+
+/** How the manager pushes mapped events out; the WS gateway implements this. */
+export interface ThreadEventSink {
+  emitToThread(threadId: string, event: WsEvent): void;
+  emitToUser(userId: string, event: WsEvent): void;
+}
+
+export interface EnsureThreadResult {
+  thread: Thread;
+  created: boolean;
+}
+
+/** What routes and the WS gateway need — tests inject fakes against this. */
+export interface ThreadService {
+  ensureThread(
+    userId: string,
+    mode: ThreadMode,
+    opts?: { topicSlug?: string | null },
+  ): Promise<EnsureThreadResult>;
+  startTurn(thread: Thread, userText: string): Promise<void>;
+  interrupt(threadId: string): Promise<void>;
+  turnInFlight(threadId: string): boolean;
+  /** Thread row ids of this user's in-flight turns (reconnect snapshot). */
+  inFlightThreads(userId: string): string[];
+  resumeAll(): Promise<void>;
+}
+
+export interface ThreadManagerDeps {
+  prisma: PrismaClient;
+  client: AppServerClient;
+  workspaces: WorkspaceManager;
+  memory: Pick<MemoryPipeline, 'beforeTurn' | 'afterTurn'>;
+  sink: ThreadEventSink;
+  logger?: CodexLogger;
+  /** Fail-safe ceiling per turn (default 10 min) so a hung turn can't wedge the queue. */
+  turnTimeoutMs?: number;
+}
+
+type ItemCompletedEvent = Extract<ThreadEvent, { type: 'itemCompleted' }>;
+type CodexItem = ItemCompletedEvent['item'];
+
+type TurnOutcome =
+  | { kind: 'completed'; status: string; errorMessage: string | null }
+  | { kind: 'aborted'; message: string };
+
+interface InFlightTurn {
+  turnId: string;
+  userId: string;
+  codexThreadId: string;
+}
+
+const NOOP_LOGGER: CodexLogger = { debug() {}, info() {}, warn() {}, error() {} };
+
+const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
+
+/** Activity-chip label cap; the web settles chips by exact label match. */
+const ACTIVITY_LABEL_MAX = 80;
+/** Mirrored exec output cap — ItemMirror is a render cache, not a log store. */
+const EXEC_OUTPUT_MAX = 2_000;
+
+function clip(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
+}
+
+export class ThreadManager implements ThreadService {
+  private readonly prisma: PrismaClient;
+  private readonly client: AppServerClient;
+  private readonly workspaces: WorkspaceManager;
+  private readonly memory: Pick<MemoryPipeline, 'beforeTurn' | 'afterTurn'>;
+  private readonly sink: ThreadEventSink;
+  private readonly log: CodexLogger;
+  private readonly turnTimeoutMs: number;
+
+  /** codexThreadIds known to the CURRENT codex child (cleared on restart). */
+  private readonly resumedThreads = new Set<string>();
+  /** codexThreadId → unsubscribe for the event fan-in (one per thread). */
+  private readonly subscriptions = new Map<string, () => void>();
+  /** Per-thread turn serialization (thread row id → queue tail). */
+  private readonly turnQueues = new Map<string, Promise<unknown>>();
+  /** Per-thread sequential ItemMirror writes (preserves createdAt ordering). */
+  private readonly mirrorQueues = new Map<string, Promise<unknown>>();
+  /** thread row id → the one in-flight turn (turns are serialized per thread). */
+  private readonly inFlight = new Map<string, InFlightTurn>();
+  /** thread row id → resolver for the in-flight turn's outcome. */
+  private readonly turnWaiters = new Map<string, (outcome: TurnOutcome) => void>();
+  /** ensureThread races: one create per (user, mode, topic) key at a time. */
+  private readonly pendingEnsures = new Map<string, Promise<EnsureThreadResult>>();
+  /** thread/resume races: one resume per codex thread at a time. */
+  private readonly pendingResumes = new Map<string, Promise<void>>();
+
+  constructor(deps: ThreadManagerDeps) {
+    this.prisma = deps.prisma;
+    this.client = deps.client;
+    this.workspaces = deps.workspaces;
+    this.memory = deps.memory;
+    this.sink = deps.sink;
+    this.log = deps.logger ?? NOOP_LOGGER;
+    this.turnTimeoutMs = deps.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+  }
+
+  /**
+   * Finds the active Thread row for (user, mode, topic) or creates one:
+   * ensureWorkspace → thread/start (cwd = workspace, mode instructions with a
+   * fresh persisted sessionToken) → persist mapping. A newly created thread
+   * immediately runs the auto-greeting turn (fire-and-forget through the
+   * per-thread queue) so the learner never faces a blank chat.
+   */
+  async ensureThread(
+    userId: string,
+    mode: ThreadMode,
+    opts: { topicSlug?: string | null } = {},
+  ): Promise<EnsureThreadResult> {
+    if (mode !== 'learn') {
+      throw new Error(
+        `ThreadManager.ensureThread: mode "${mode}" is not creatable in Phase 1 ` +
+          '(review lands with ReviewService, exam threads are forked by ExamService)',
+      );
+    }
+    const topicSlug = opts.topicSlug ?? null;
+    const key = [userId, mode, topicSlug ?? ''].join('\u0000');
+    const pending = this.pendingEnsures.get(key);
+    if (pending) return pending;
+    const promise = this.findOrCreate(userId, mode, topicSlug).finally(() =>
+      this.pendingEnsures.delete(key),
+    );
+    this.pendingEnsures.set(key, promise);
+    return promise;
+  }
+
+  /**
+   * Queues one turn on the thread: context envelope + user text →
+   * turn/start → stream events to the gateway + ItemMirror → on completion
+   * run the MemoryPipeline and emit turn.completed / turn.error. Resolves
+   * when the turn has fully settled (E2E and tests await it; the gateway
+   * fires-and-forgets with a turn.error catch).
+   */
+  startTurn(thread: Thread, userText: string): Promise<void> {
+    return this.enqueueTurn(thread, userText, 'user');
+  }
+
+  /** Interrupts the thread's in-flight turn, if any (no-op otherwise). */
+  async interrupt(threadId: string): Promise<void> {
+    const inflight = this.inFlight.get(threadId);
+    if (!inflight) return;
+    await this.client.interruptTurn(inflight.codexThreadId, inflight.turnId);
+  }
+
+  turnInFlight(threadId: string): boolean {
+    return this.inFlight.has(threadId);
+  }
+
+  inFlightThreads(userId: string): string[] {
+    const ids: string[] = [];
+    for (const [threadId, turn] of this.inFlight) {
+      if (turn.userId === userId) ids.push(threadId);
+    }
+    return ids;
+  }
+
+  /**
+   * After a codex auto-restart (client.onRestarted): the new child knows no
+   * threads, so re-resume every thread this process has touched. Emits
+   * nothing — in-flight turns were already failed via synthetic turnAborted.
+   */
+  async resumeAll(): Promise<void> {
+    this.resumedThreads.clear();
+    const codexThreadIds = [...this.subscriptions.keys()];
+    if (codexThreadIds.length === 0) return;
+    const threads = await this.prisma.thread.findMany({
+      where: { codexThreadId: { in: codexThreadIds }, status: 'active' },
+    });
+    for (const thread of threads) {
+      try {
+        await this.ensureResumed(thread);
+      } catch (err) {
+        this.log.error({ err, threadId: thread.id }, 'resumeAll: thread/resume failed');
+      }
+    }
+    this.log.info({ resumed: threads.length }, 'threads re-resumed after codex restart');
+  }
+
+  /** Drops all event subscriptions (shutdown/test teardown). */
+  close(): void {
+    for (const unsubscribe of this.subscriptions.values()) unsubscribe();
+    this.subscriptions.clear();
+  }
+
+  // ------------------------------------------------------------------ ensure
+
+  private async findOrCreate(
+    userId: string,
+    mode: ThreadMode,
+    topicSlug: string | null,
+  ): Promise<EnsureThreadResult> {
+    const existing = await this.prisma.thread.findFirst({
+      where: { userId, mode, topicSlug, status: 'active' },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (existing) {
+      await this.ensureResumed(existing);
+      return { thread: existing, created: false };
+    }
+
+    const workspace = await this.workspaces.ensureWorkspace(userId);
+    const sessionToken = randomUUID();
+    const onboarded = await this.workspaces.hasCommittedProfile(userId);
+    const developerInstructions = await this.instructionsFor({
+      userId,
+      mode,
+      topicSlug,
+      sessionToken,
+      onboarded,
+    });
+    const started = await this.client.startThread({
+      cwd: workspace.path,
+      developerInstructions,
+    });
+    const thread = await this.prisma.thread.create({
+      data: {
+        userId,
+        codexThreadId: started.thread.id,
+        mode,
+        topicSlug,
+        title: this.titleFor(topicSlug, onboarded),
+        sessionToken,
+      },
+    });
+    this.resumedThreads.add(thread.codexThreadId);
+    this.attach(thread);
+    this.log.info(
+      { threadId: thread.id, codexThreadId: thread.codexThreadId, mode, topicSlug, onboarded },
+      'thread created',
+    );
+
+    // Auto-greeting: queued like any turn; failures surface as turn.error so
+    // the UI shows a retryable state instead of a silent blank chat.
+    void this.enqueueTurn(thread, GREETING_INPUT, 'system').catch((err: unknown) => {
+      this.log.error({ err, threadId: thread.id }, 'greeting turn failed');
+      this.emitTurnEvent(thread, {
+        type: 'turn.error',
+        message: 'The tutor could not open the session. Send a message to try again.',
+        retryable: true,
+      });
+    });
+
+    return { thread, created: true };
+  }
+
+  private async instructionsFor(opts: {
+    userId: string;
+    mode: ThreadMode;
+    topicSlug: string | null;
+    sessionToken: string;
+    onboarded: boolean;
+  }): Promise<string> {
+    if (!opts.onboarded) {
+      // The account name keeps profile.md's required `name:` from coming out
+      // null when the learner never states one (E2E prompt-bug finding).
+      const user = await this.prisma.user.findUnique({ where: { id: opts.userId } });
+      return buildOnboardingInstructions({
+        sessionToken: opts.sessionToken,
+        ...(user ? { learnerName: user.displayName } : {}),
+      });
+    }
+    return buildLearnInstructions({
+      sessionToken: opts.sessionToken,
+      topicSlug: opts.topicSlug,
+      isSessionStart: true,
+    });
+  }
+
+  private titleFor(topicSlug: string | null, onboarded: boolean): string {
+    if (!onboarded) return 'Getting to know you';
+    return topicSlug ? `Learning ${topicSlug}` : 'Learning session';
+  }
+
+  /**
+   * Makes sure the CURRENT codex child knows this thread. Instructions are
+   * rebuilt from current state (same persisted sessionToken) — this is where
+   * a finished-onboarding learner's thread rotates to learn-mode instructions
+   * (plans/03 §3.1 re-resume rule).
+   */
+  private async ensureResumed(thread: Thread): Promise<void> {
+    this.attach(thread);
+    if (this.resumedThreads.has(thread.codexThreadId)) return;
+    const pending = this.pendingResumes.get(thread.codexThreadId);
+    if (pending) return pending;
+    const promise = this.resume(thread).finally(() =>
+      this.pendingResumes.delete(thread.codexThreadId),
+    );
+    this.pendingResumes.set(thread.codexThreadId, promise);
+    return promise;
+  }
+
+  private async resume(thread: Thread): Promise<void> {
+    const workspace = await this.workspaces.ensureWorkspace(thread.userId);
+    const onboarded = await this.workspaces.hasCommittedProfile(thread.userId);
+    await this.client.resumeThread({
+      threadId: thread.codexThreadId,
+      cwd: workspace.path,
+      developerInstructions: await this.instructionsFor({
+        userId: thread.userId,
+        mode: thread.mode as ThreadMode,
+        topicSlug: thread.topicSlug,
+        sessionToken: thread.sessionToken,
+        onboarded,
+      }),
+    });
+    this.resumedThreads.add(thread.codexThreadId);
+    this.log.info({ threadId: thread.id, codexThreadId: thread.codexThreadId }, 'thread resumed');
+  }
+
+  // ------------------------------------------------------------------- turns
+
+  private enqueueTurn(thread: Thread, text: string, role: 'user' | 'system'): Promise<void> {
+    return this.enqueue(this.turnQueues, thread.id, () => this.runTurn(thread, text, role));
+  }
+
+  private async runTurn(thread: Thread, text: string, role: 'user' | 'system'): Promise<void> {
+    await this.ensureResumed(thread);
+
+    const model = await this.workspaces.readLearnerModel(thread.userId);
+    const digest = formatStateDigest(model);
+    const input = buildContextEnvelope(digest, { needsRepair: model.needsRepair }) + text;
+    const sinceSha = await this.memory.beforeTurn(thread.userId);
+
+    // The mirror stores the RAW text (the envelope is wire-only context).
+    await this.mirrorWrite(thread.id, {
+      threadId: thread.id,
+      role,
+      kind: 'message',
+      payload: { text },
+    });
+    await this.prisma.thread.update({
+      where: { id: thread.id },
+      data: { lastActiveAt: new Date() },
+    });
+
+    // Waiter registered before turn/start: completion events can never race it.
+    let timeout: NodeJS.Timeout | null = null;
+    const completion = new Promise<TurnOutcome>((resolve) => {
+      this.turnWaiters.set(thread.id, resolve);
+      timeout = setTimeout(() => {
+        resolve({
+          kind: 'aborted',
+          message: `turn exceeded the ${this.turnTimeoutMs}ms fail-safe ceiling`,
+        });
+      }, this.turnTimeoutMs);
+      timeout.unref?.();
+    });
+
+    let turnId: string;
+    try {
+      // The memory skill has the agent `git commit` its own learning events,
+      // but workspace-write marks the workspace's top-level .git read-only
+      // (commits die on .git/index.lock EPERM) — grant it back explicitly.
+      const response = await this.client.startTurn(thread.codexThreadId, input, {
+        writableRoots: [path.join(this.workspaces.pathFor(thread.userId), '.git')],
+      });
+      turnId = response.turn.id;
+    } catch (err) {
+      this.turnWaiters.delete(thread.id);
+      if (timeout !== null) clearTimeout(timeout);
+      throw err;
+    }
+    this.inFlight.set(thread.id, {
+      turnId,
+      userId: thread.userId,
+      codexThreadId: thread.codexThreadId,
+    });
+    this.log.info({ threadId: thread.id, turnId, role }, 'turn dispatched');
+
+    const outcome = await completion;
+    if (timeout !== null) clearTimeout(timeout);
+    this.turnWaiters.delete(thread.id);
+    this.inFlight.delete(thread.id);
+    // Queued ItemMirror writes land before the pipeline + completion events —
+    // clients refetch items when a turn settles.
+    await this.mirrorQueues.get(thread.id);
+
+    if (outcome.kind === 'aborted') {
+      // Synthetic abort (child died / fail-safe): no MemoryPipeline — the next
+      // completed turn's dirty-checkpoint sweep picks up any partial writes.
+      this.log.warn({ threadId: thread.id, turnId, message: outcome.message }, 'turn aborted');
+      this.emitTurnEvent(thread, {
+        type: 'turn.error',
+        message: 'The tutor lost its train of thought (backend restarted). Try again.',
+        retryable: true,
+      });
+      return;
+    }
+
+    try {
+      const commits = await this.memory.afterTurn({
+        userId: thread.userId,
+        threadId: thread.id,
+        topicSlug: thread.topicSlug,
+        sinceSha,
+      });
+      // The pipeline already emitted to the user socket; thread-socket
+      // consumers (commit toasts) get their copy here.
+      for (const commit of commits) {
+        this.sink.emitToThread(thread.id, { type: 'memory.commit', commit });
+      }
+    } catch (err) {
+      this.log.error({ err, threadId: thread.id, turnId }, 'memory pipeline failed after turn');
+    }
+
+    if (outcome.status === 'failed') {
+      this.emitTurnEvent(thread, {
+        type: 'turn.error',
+        message: outcome.errorMessage ?? 'The turn failed. Try again.',
+        retryable: true,
+      });
+    } else {
+      // "completed" and user-initiated "interrupted" both settle the UI.
+      this.emitTurnEvent(thread, { type: 'turn.completed', threadId: thread.id });
+    }
+  }
+
+  // ------------------------------------------------------------ event fan-in
+
+  private attach(thread: Thread): void {
+    if (this.subscriptions.has(thread.codexThreadId)) return;
+    const unsubscribe = this.client.onThreadEvent(thread.codexThreadId, (event) => {
+      try {
+        this.handleThreadEvent(thread, event);
+      } catch (err) {
+        this.log.error({ err, threadId: thread.id, type: event.type }, 'thread event handler threw');
+      }
+    });
+    this.subscriptions.set(thread.codexThreadId, unsubscribe);
+  }
+
+  private handleThreadEvent(thread: Thread, event: ThreadEvent): void {
+    switch (event.type) {
+      case 'turnStarted':
+        this.emitTurnEvent(thread, { type: 'turn.started', threadId: thread.id });
+        return;
+      case 'agentMessageDelta':
+        this.sink.emitToThread(thread.id, {
+          type: 'message.delta',
+          itemId: event.itemId,
+          text: event.delta,
+        });
+        return;
+      case 'reasoningSummaryDelta':
+      case 'reasoningTextDelta':
+        this.sink.emitToThread(thread.id, { type: 'reasoning.delta', text: event.delta });
+        return;
+      case 'itemStarted': {
+        const activity = activityFor(event.item);
+        if (activity) {
+          this.sink.emitToThread(thread.id, { ...activity, type: 'activity', status: 'started' });
+        }
+        return;
+      }
+      case 'itemCompleted':
+        this.handleItemCompleted(thread, event.item);
+        return;
+      case 'turnCompleted': {
+        const waiter = this.turnWaiters.get(thread.id);
+        if (!waiter) {
+          this.log.warn(
+            { threadId: thread.id, turnId: event.turn.id, status: event.turn.status },
+            'turn completed with no waiter — ignoring',
+          );
+          return;
+        }
+        waiter({
+          kind: 'completed',
+          status: event.turn.status,
+          errorMessage: event.turn.error?.message ?? null,
+        });
+        return;
+      }
+      case 'turnAborted': {
+        const waiter = this.turnWaiters.get(thread.id);
+        waiter?.({ kind: 'aborted', message: event.error.message });
+        return;
+      }
+      default:
+        return; // status/tokenUsage/plan/diff/raw — nothing to surface yet
+    }
+  }
+
+  private handleItemCompleted(thread: Thread, item: CodexItem): void {
+    const activity = activityFor(item);
+    if (activity) {
+      this.sink.emitToThread(thread.id, {
+        ...activity,
+        type: 'activity',
+        status: itemFailed(item) ? 'failed' : 'completed',
+      });
+    }
+
+    const row = mirrorRowFor(item);
+    if (!row) return;
+    void this.enqueue(this.mirrorQueues, thread.id, async () => {
+      await this.mirrorWrite(thread.id, {
+        id: item.id,
+        threadId: thread.id,
+        codexItemId: item.id,
+        ...row,
+      });
+      // message.completed AFTER the mirror write: a client that refetches on
+      // this event finds the row (id = codex item id, so it dedupes).
+      if (item.type === 'agentMessage') {
+        this.sink.emitToThread(thread.id, {
+          type: 'message.completed',
+          itemId: item.id,
+          text: item.text,
+        });
+      }
+    }).catch((err: unknown) => {
+      this.log.error({ err, threadId: thread.id, itemId: item.id }, 'ItemMirror write failed');
+    });
+  }
+
+  private emitTurnEvent(thread: Thread, event: WsEvent): void {
+    // Turn lifecycle goes to the thread socket AND the user socket (plans/03 §7).
+    this.sink.emitToThread(thread.id, event);
+    this.sink.emitToUser(thread.userId, event);
+  }
+
+  // -------------------------------------------------------------- plumbing
+
+  private async mirrorWrite(
+    threadId: string,
+    data: {
+      id?: string;
+      threadId: string;
+      codexItemId?: string;
+      role: string;
+      kind: string;
+      payload: Prisma.InputJsonValue;
+    },
+  ): Promise<void> {
+    if (data.id === undefined) {
+      await this.prisma.itemMirror.create({ data });
+      return;
+    }
+    // Idempotent for replayed item/completed events (e.g. around restarts).
+    await this.prisma.itemMirror.upsert({
+      where: { id: data.id },
+      create: data,
+      update: { payload: data.payload },
+    });
+  }
+
+  private enqueue<T>(
+    queues: Map<string, Promise<unknown>>,
+    key: string,
+    job: () => Promise<T>,
+  ): Promise<T> {
+    const tail = queues.get(key) ?? Promise.resolve();
+    const next = tail.then(job, job);
+    queues.set(
+      key,
+      next.catch(() => {}),
+    );
+    return next;
+  }
+}
+
+/** Activity-chip mapping for exec/tool/file items (plans/03 §7 `activity`). */
+function activityFor(item: CodexItem): { kind: 'exec' | 'tool'; label: string } | null {
+  switch (item.type) {
+    case 'commandExecution':
+      return { kind: 'exec', label: clip(item.command, ACTIVITY_LABEL_MAX) };
+    case 'mcpToolCall':
+      return { kind: 'tool', label: clip(item.tool, ACTIVITY_LABEL_MAX) };
+    case 'fileChange':
+      return { kind: 'exec', label: 'updating memory files' };
+    default:
+      return null;
+  }
+}
+
+function itemFailed(item: CodexItem): boolean {
+  switch (item.type) {
+    case 'commandExecution':
+      return item.status === 'failed' || (item.exitCode !== null && item.exitCode !== 0);
+    case 'mcpToolCall':
+      return item.status === 'failed';
+    case 'fileChange':
+      return item.status === 'failed';
+    default:
+      return false;
+  }
+}
+
+/**
+ * ItemMirror rows for completed items (plans/02 §5 kinds). Agent messages use
+ * the CODEX item id as the row id so streamed WS items and refetched history
+ * dedupe by the same id in the web client. userMessage items are skipped —
+ * the manager mirrors the raw user text itself (the codex item would contain
+ * the context envelope).
+ */
+function mirrorRowFor(
+  item: CodexItem,
+): { role: string; kind: string; payload: Prisma.InputJsonValue } | null {
+  switch (item.type) {
+    case 'agentMessage':
+      return {
+        role: 'agent',
+        kind: 'message',
+        payload: { text: item.text, phase: item.phase ?? null },
+      };
+    case 'reasoning':
+      if (item.summary.length === 0) return null;
+      return { role: 'agent', kind: 'reasoning', payload: { summary: item.summary } };
+    case 'commandExecution':
+      return {
+        role: 'agent',
+        kind: 'exec',
+        payload: {
+          command: item.command,
+          status: item.status,
+          exitCode: item.exitCode,
+          durationMs: item.durationMs,
+          aggregatedOutput:
+            item.aggregatedOutput === null ? null : clip(item.aggregatedOutput, EXEC_OUTPUT_MAX),
+        },
+      };
+    case 'mcpToolCall':
+      return {
+        role: 'agent',
+        kind: 'tool_call',
+        payload: { server: item.server, tool: item.tool, status: item.status },
+      };
+    default:
+      return null;
+  }
+}

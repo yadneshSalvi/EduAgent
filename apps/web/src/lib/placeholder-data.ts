@@ -6,7 +6,8 @@
  * populated shell.
  */
 export const PLACEHOLDER_USER = {
-  name: 'Alex',
+  /** null = no session yet — the chip stays identity-neutral ("Not signed in"). */
+  name: null as string | null,
   /** 0 = no streak yet; the flame renders only when > 0. */
   streakDays: 0,
 };

@@ -1,12 +1,36 @@
 /**
- * Phase 1 module stub — nothing here is wired yet.
- *
- * Lands here (plans/03_backend.md §2–3.1, plans/01_architecture.md §4):
- * - AppServerClient: JSON-RPC/JSONL over stdio to the `codex app-server`
- *   child — spawn + initialize handshake, pending-request map, typed
- *   notification events, auto-restart with backoff. Wire shapes are locked to
- *   docs/PROTOCOL_NOTES.md (Phase 0 spike output) — never guessed.
- * - ThreadManager: ensureThread / resumeAll / forkForExam / startTurn; owns
- *   all ItemMirror writes and per-thread turn serialization.
+ * codex protocol layer (plans/03 §2). AppServerClient is the ONLY module
+ * allowed to speak protocol shapes; consumers (ThreadManager, healthz wiring
+ * — task #11) import from here and stay protocol-agnostic where possible.
  */
-export {};
+export { AppServerClient } from './AppServerClient.js';
+export { AppServerError, AppServerRequestError, AppServerConnectionError } from './errors.js';
+export {
+  buildElicitationContext,
+  defaultElicitationApprover,
+  extractElicitationToolName,
+} from './elicitation.js';
+export { renderMcpConfigArgs } from './mcp-args.js';
+export type {
+  AppServerChildProcess,
+  AppServerClientEventMap,
+  AppServerClientOptions,
+  AppServerMethodName,
+  AppServerMethods,
+  BackoffOptions,
+  CodexLogger,
+  ElicitationApprover,
+  ElicitationContext,
+  ForkThreadOptions,
+  HealthProbe,
+  JsonValue,
+  McpServerSpec,
+  RawNotification,
+  ResumeThreadOptions,
+  SpawnAppServer,
+  StartThreadOptions,
+  StartTurnOptions,
+  ThreadEvent,
+  ThreadEventListener,
+  ThreadEventType,
+} from './types.js';
