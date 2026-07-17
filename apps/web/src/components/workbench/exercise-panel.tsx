@@ -106,6 +106,12 @@ function ExerciseWorkspace({
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () =>
               submitRef.current(),
             );
+            // Typing into the locked (grading/graded) editor pops monaco's
+            // "Cannot edit in read-only editor" widget, whose text then
+            // lingers in a global role="alert" node (QA finding F9). The
+            // verdict banner + disabled Run button already carry that state,
+            // so drop the contribution entirely.
+            editor.getContribution('editor.contrib.readOnlyMessageController')?.dispose();
           }}
           onChange={(next) => {
             const value = next ?? '';

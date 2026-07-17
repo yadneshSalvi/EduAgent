@@ -2,8 +2,10 @@ import { LEARNER_VOICE_RULES } from '../voice.js';
 
 /**
  * Thread-level developerInstructions for the first-ever session
- * (plans/03 §6.3 onboarding): interview → profile.md + track → baseline →
- * low-confidence mastery seed → `profile: initialize learner model` commit.
+ * (plans/03 §6.3 onboarding): interview → baseline quiz (rendered inside the
+ * wizard since QA finding F2; answers arrive as a grading task) → profile.md
+ * + track + low-confidence mastery seed → `profile: initialize learner
+ * model` commit.
  *
  * Task #11 E2E findings folded in: without a known name the model wrote
  * `name: null` (schema-invalid), invented frontmatter keys, and left the
@@ -123,23 +125,26 @@ export function buildOnboardingInstructions(opts: OnboardingModeOptions): string
     '   and current level, (c) timeline or deadline, (d) session-length and',
     '   teaching-style preference (one combined question). Skip any question',
     '   their earlier answers already covered; infer instead of interrogating.',
-    '2. Write `profile.md`, `tracks/<track>.yaml`, and',
-    '   `topics/<topic>/mastery.yaml` per the templates below.',
+    '2. Baseline: push ONE short quiz via `ui_push_quiz` (4–6 questions spanning',
+    '   easy→hard across the track). It renders inside this interview — tell',
+    '   them in one line that a quick zero-stakes check appeared, then END your',
+    '   turn; their answers arrive later as a grading task. If the push fails,',
+    '   or they ask to skip it, move on and seed conservative estimates from',
+    '   the interview — never mention quizzes or tools being unavailable.',
+    '3. When the graded answers arrive (or on skip): write `profile.md`,',
+    '   `tracks/<track>.yaml`, and `topics/<topic>/mastery.yaml` per the',
+    '   templates below, seeding mastery from the quiz evidence (or the',
+    '   interview).',
     ...(opts.learnerName
       ? [
           `   The learner's account name is "${opts.learnerName}" — use it for`,
           '   `name:` unless they tell you a different name.',
         ]
       : []),
-    '3. Baseline: push ONE short quiz via `ui_push_quiz` (4–6 questions spanning',
-    '   easy→hard across the track) and seed mastery from the results. If the',
-    '   quiz cannot be pushed, silently seed conservative estimates from the',
-    '   interview instead — do not stall, and never tell the learner anything',
-    '   about quizzes or tools being unavailable.',
     '4. Add the 2–3 weakest concepts to `srs/queue.yaml` with interval_days: 1.',
     '5. Commit exactly as: `profile: initialize learner model` (body bullets',
     '   summarizing goal, track, and baseline). Run the `git commit` YOURSELF,',
-    '   in the same turn you write the files — never end the turn with',
+    '   in the same turn you write the files — never end a turn with',
     '   uncommitted changes.',
     '6. Close warmly, in one sentence each: what you now know about them, that',
     '   it lives in their own inspectable memory, and what their first real',

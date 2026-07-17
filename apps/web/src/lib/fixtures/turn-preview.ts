@@ -641,12 +641,88 @@ const ONBOARDING_BACKGROUND = `Good — that's a workable runway.
 
 **Second: where are you starting from?** What have you built or studied that feels related?`;
 
-const ONBOARDING_BASELINE = `That gives me a picture — let's calibrate it. Two quick questions, zero stakes:
-
-1. In one line: what's the difference between an \`INNER JOIN\` and a \`LEFT JOIN\`?
-2. Would you reach for \`GROUP BY\` or a window function to show each order **with** its customer's running total?`;
+const ONBOARDING_BASELINE = `That gives me a picture — let's calibrate it. A tiny baseline check just appeared: three quick questions, zero stakes. Answer what you can; guessing is useful data too.`;
 
 const ONBOARDING_FINALE = `Perfect — I know enough to start. Writing your profile now; you can watch me do it.`;
+
+/** Baseline quiz for the onboarding preview — answered inside the wizard. */
+export const ONBOARDING_QUIZ_PAYLOAD: QuizPayload = {
+  id: 'quiz-ob-001',
+  concepts: ['inner-join', 'group-by'],
+  questions: [
+    {
+      id: 'ob-q1',
+      type: 'mcq',
+      prompt_md: 'An `INNER JOIN` between `customers` and `orders` returns…',
+      options: [
+        'Every customer, with NULLs where no order matches',
+        'Only the customer–order pairs that match the join condition',
+        'Every combination of customer and order',
+        'Only customers without orders',
+      ],
+      answer: 'Only the customer–order pairs that match the join condition',
+    },
+    {
+      id: 'ob-q2',
+      type: 'predict_output',
+      prompt_md: `\`orders\` has 3 rows with totals 40, 90, and 120. What single number does this return?
+
+\`\`\`sql
+SELECT count(*) FROM orders WHERE total > 50;
+\`\`\``,
+      answer: '2',
+    },
+    {
+      id: 'ob-q3',
+      type: 'short',
+      prompt_md: 'In one line: when would you reach for `GROUP BY`?',
+    },
+  ],
+};
+
+const ONBOARDING_GRADED_TEXT = `Nice — that's exactly the calibration I needed. Joins look solid; aggregation is where we'll start. Writing your profile now; you can watch me do it.`;
+
+/**
+ * Replayed when the preview learner finishes the baseline quiz: grade →
+ * profile write → the birth commit (the finale takes over from there).
+ */
+export const onboardingQuizGradedScript: ReplayStep[] = [
+  { at: 100, event: { type: 'turn.started', threadId: 'dev-onboarding-thread' } },
+  {
+    at: 400,
+    event: { type: 'activity', kind: 'tool', label: 'grading your answers', status: 'started' },
+  },
+  {
+    at: 1300,
+    event: { type: 'activity', kind: 'tool', label: 'grading your answers', status: 'completed' },
+  },
+  {
+    at: 1500,
+    event: {
+      type: 'quiz.graded',
+      quizId: 'quiz-ob-001',
+      results: [
+        {
+          question_id: 'ob-q3',
+          verdict: 'partial',
+          feedback_md:
+            'Right instinct — collapsing rows into groups. The refinement: `GROUP BY` is for one row *per group*; running totals need a window function.',
+        },
+      ],
+    },
+  },
+  ...messageDeltas('item-ob-graded', ONBOARDING_GRADED_TEXT, 2000, 50),
+  {
+    at: 5200,
+    event: { type: 'activity', kind: 'tool', label: 'writing your profile', status: 'started' },
+  },
+  {
+    at: 6300,
+    event: { type: 'activity', kind: 'tool', label: 'writing your profile', status: 'completed' },
+  },
+  { at: 6600, event: { type: 'memory.commit', commit: ONBOARDING_COMMIT } },
+  { at: 6900, event: { type: 'turn.completed', threadId: 'dev-onboarding-thread' } },
+];
 
 export const onboardingGreetingScript: ReplayStep[] = [
   { at: 0, event: { type: 'turn.started', threadId: 'dev-onboarding-thread' } },
@@ -672,10 +748,14 @@ function onboardingReply(itemId: string, text: string, extra: ReplayStep[] = [])
   ];
 }
 
-/** Consumed one per user send: Background → Baseline → profile commit. */
+/** Consumed one per user send: Background → Baseline (quiz push) → profile
+ * commit (the chat-skip path; finishing the quiz instead replays
+ * onboardingQuizGradedScript). */
 export const onboardingReplyScripts: ReplayStep[][] = [
   onboardingReply('item-ob-background', ONBOARDING_BACKGROUND),
-  onboardingReply('item-ob-baseline', ONBOARDING_BASELINE),
+  onboardingReply('item-ob-baseline', ONBOARDING_BASELINE, [
+    { at: 300, event: { type: 'workbench.quiz', quiz: ONBOARDING_QUIZ_PAYLOAD } },
+  ]),
   onboardingReply('item-ob-finale', ONBOARDING_FINALE, [
     {
       at: 300,

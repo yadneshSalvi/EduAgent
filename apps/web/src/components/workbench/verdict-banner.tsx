@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { CheckCircle2, MessageSquareText, RotateCcw, XCircle } from 'lucide-react';
 import type { ExerciseVerdict } from '@eduagent/shared';
 import { Button } from '@/components/ui/button';
+import { Markdown } from '@/components/chat/markdown';
 import { cn } from '@/lib/utils';
 
 /**
@@ -70,7 +71,11 @@ export function VerdictBanner({ verdict, feedback, attempts, onTryAgain }: Verdi
                 : 'Passed — first try.'
               : `Not yet — attempt ${attempts} failed.`}
           </p>
-          {feedback ? <p className="text-body-sm text-muted-foreground">{feedback}</p> : null}
+          {feedback ? (
+            // feedback is feedback_md — render it (QA finding F3: literal
+            // `**Hint:**`/backticks read as noise in the verdict).
+            <Markdown content={feedback} className="text-body-sm text-muted-foreground" />
+          ) : null}
           <p className="flex items-center gap-1.5 font-mono text-caption text-muted-foreground">
             <MessageSquareText className="size-3.5 shrink-0" aria-hidden />
             {passed ? 'The tutor recaps what this proved in chat.' : 'Full walkthrough in chat →'}

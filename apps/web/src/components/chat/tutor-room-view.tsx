@@ -15,9 +15,11 @@ import { cn } from '@/lib/utils';
 
 /**
  * Presentational tutor room (plans/04 §3): chat (55%) + workbench (45%,
- * stacked under the chat < md). Driven either by the live useTurnStream hook
- * or the dev-harness replay driver — same reducer, same UI. Submission
- * transports are injected the same way (REST vs scripted replay).
+ * stacked under the chat below lg — Tailwind's md: starts AT 768px, so a
+ * 768px tablet would squeeze side-by-side under md:, QA finding F5). Driven
+ * either by the live useTurnStream hook or the dev-harness replay driver —
+ * same reducer, same UI. Submission transports are injected the same way
+ * (REST vs scripted replay).
  */
 interface TutorRoomViewProps {
   title: string;
@@ -108,7 +110,7 @@ export function TutorRoomView({
         </Button>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {state.connection === 'not-found' ? (
             <div className="flex flex-1 items-center justify-center p-8">

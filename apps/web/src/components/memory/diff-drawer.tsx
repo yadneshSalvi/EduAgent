@@ -27,6 +27,80 @@ const MonacoDiff = dynamic(() => import('@monaco-editor/react').then((m) => m.Di
   ),
 });
 
+/** What our unmount cleanup needs from the diff editor (QA finding F6). */
+interface DisposableDiffEditor {
+  getModel(): { original: { dispose(): void }; modified: { dispose(): void } } | null;
+  setModel(model: null): void;
+}
+
+/**
+ * One commit file rendered in the Monaco DiffEditor (QA finding F6):
+ * @monaco-editor/react's own cleanup disposes the text models while they are
+ * still attached to the widget, logging "TextModel got disposed before
+ * DiffEditorWidget model got reset" on every close/file switch. keepCurrent*
+ * stops the library from touching the models; our cleanup runs first (parents
+ * unwind before children on unmount), detaches them, THEN disposes — so
+ * nothing leaks and the widget never sees a dead model.
+ */
+function CommitFileDiff({
+  original,
+  modified,
+  language,
+}: {
+  original: string;
+  modified: string;
+  language: string;
+}) {
+  const editorRef = useRef<DisposableDiffEditor | null>(null);
+  useEffect(
+    () => () => {
+      const editor = editorRef.current;
+      editorRef.current = null;
+      if (!editor) return;
+      try {
+        const model = editor.getModel();
+        editor.setModel(null);
+        model?.original.dispose();
+        model?.modified.dispose();
+      } catch {
+        // already disposed by the library — nothing left to release
+      }
+    },
+    [],
+  );
+  return (
+    <MonacoDiff
+      original={original}
+      modified={modified}
+      language={language}
+      keepCurrentOriginalModel
+      keepCurrentModifiedModel
+      onMount={(editor) => {
+        editorRef.current = editor;
+      }}
+      theme="eduagent-dark"
+      beforeMount={defineEduAgentTheme}
+      height="100%"
+      options={{
+        readOnly: true,
+        renderSideBySide: false,
+        minimap: { enabled: false },
+        scrollBeyondLastLine: false,
+        lineNumbers: 'on',
+        folding: false,
+        renderOverviewRuler: false,
+        fontSize: 13,
+        fontFamily: MONACO_FONT_FAMILY,
+        padding: { top: 12, bottom: 12 },
+        hideUnchangedRegions: { enabled: false },
+        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+        overviewRulerLanes: 0,
+        contextmenu: false,
+      }}
+    />
+  );
+}
+
 export const DIFF_DRAWER_DEFAULT_HEADER = 'EduAgent updated its memory of you.';
 
 interface DiffDrawerProps {
@@ -169,30 +243,11 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
                 ) : null}
                 <div className="min-h-0 flex-1">
                   {activeFile ? (
-                    <MonacoDiff
+                    <CommitFileDiff
                       key={`${commit.sha}:${activeFile.path}`}
                       original={activeFile.original}
                       modified={activeFile.modified}
                       language={languageForPath(activeFile.path)}
-                      theme="eduagent-dark"
-                      beforeMount={defineEduAgentTheme}
-                      height="100%"
-                      options={{
-                        readOnly: true,
-                        renderSideBySide: false,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        lineNumbers: 'on',
-                        folding: false,
-                        renderOverviewRuler: false,
-                        fontSize: 13,
-                        fontFamily: MONACO_FONT_FAMILY,
-                        padding: { top: 12, bottom: 12 },
-                        hideUnchangedRegions: { enabled: false },
-                        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-                        overviewRulerLanes: 0,
-                        contextmenu: false,
-                      }}
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center font-mono text-caption text-muted-foreground">

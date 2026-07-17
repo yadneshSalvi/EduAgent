@@ -4,6 +4,53 @@ Prompts are code (plans/03 §6.4): every material change to a skill, mode
 template, or the context envelope gets an entry here, and the golden-path E2E
 must be re-run before merging prompt changes.
 
+## 2026-07-17 — Phase 3A: review-mode template (plans/03 §6.3 amended)
+
+- New `buildReviewInstructions` (prompts/modes/review.ts) — thread-level
+  developerInstructions for REVIEW threads: quiz-driven retrieval practice
+  over the due queue, ONE concept at a time via `ui_push_quiz`, NEW questions
+  every time (never reuse phrasing from evidence/notes/session logs), voice
+  rules included. The quiz-grading follow-through is thread-level too: after
+  grading, apply the memory skill in full (SM-2 SRS update + mastery evidence
+  + `review(<topic>)` commit + ui_record_assessment mirror), then push the
+  NEXT due concept's quiz **in the same turn** — this rides the unchanged
+  `buildQuizGradingTurn` template because thread instructions stay in force.
+- New per-turn envelope notes for review threads (`formatReviewDueNotes`):
+  the FULL due list (topic/concept, name, due date, overdue marker; the
+  digest previews only 3), rebuilt from disk every turn so it shrinks live as
+  the agent updates `srs/queue.yaml`. Empty queue → an explicit "nothing is
+  due, close the session, do not invent reviews" directive.
+- Session-open protocol: on `[session-start]` / `[review-session-start]`,
+  greet in one line and push the first quiz immediately (no menus). The
+  kickoff system turn (reused idle threads) carries a chat caption per the
+  Phase 2 no-captionless-system-turns rule.
+- Verified live by the Phase 3 E2E (e2e-phase3.test.ts): two consecutive
+  green runs — quiz on a due concept, SM-2 reschedule in the queue file,
+  `review(...)` commit, dashboard invalidation.
+
+## 2026-07-17 — Phase 2 QA fixes (findings F2, F8)
+
+- `buildOnboardingInstructions` protocol reordered (F2 — the baseline quiz now
+  actually renders inside the onboarding wizard): interview → **push the
+  baseline quiz and END the turn** (answers arrive later as a grading task) →
+  write profile/track/mastery seeded from the quiz evidence (or the interview,
+  on push-failure/skip) → SRS → the `profile: initialize learner model`
+  commit. Previously the files were written before the quiz, so the commit —
+  which flips the wizard to the "memory born" finale — could land while the
+  quiz sat unanswered. The silent fallback language is unchanged: push failure
+  or an explicit learner skip seeds conservative estimates without ever
+  mentioning quizzes/tools being unavailable.
+- Teach skill §5 authoring flow, new step 4 (F8): commit the freshly authored
+  `.exercises/<id>/` workdir in the SAME turn as the push (grammar
+  `system(<topic>): author <id> …`). QA's live session showed every exercise
+  push ending the turn dirty and tripping the server's checkpoint sweep
+  (`workspace dirty after turn`) — the authoring flow simply never said to
+  commit. The `ui_push_exercise` relay success string restates the same
+  instruction at tool-call time.
+- E2E (e2e-phase2) extension: every `memory.commit` seen on the thread socket
+  must also reach the USER socket (`/ws/user`) by sha — the surface commit
+  toasts are fed from.
+
 ## 2026-07-17 — Phase 2A: tool descriptions + grading-turn templates
 
 - Added `uiToolDescriptions` (packages/shared/src/mcp-tools.ts) — the

@@ -4,18 +4,23 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
-import { Check, GitCommitHorizontal, Loader2 } from 'lucide-react';
-import type { MemoryCommit } from '@eduagent/shared';
+import { Check, GitCommitHorizontal, ListChecks, Loader2 } from 'lucide-react';
+import type { MemoryCommit, SubmitQuizRequest } from '@eduagent/shared';
 import { useMe } from '@/hooks/use-me';
 import { useTurnStream, type TurnStream } from '@/hooks/use-turn-stream';
 import { useReplayTurnStream } from '@/hooks/use-replay-turn-stream';
-import { onboardingGreetingScript, onboardingReplyScripts } from '@/lib/fixtures/turn-preview';
-import { ApiConnectionError, ApiError, createThread, interruptThread } from '@/lib/api';
+import {
+  onboardingGreetingScript,
+  onboardingQuizGradedScript,
+  onboardingReplyScripts,
+} from '@/lib/fixtures/turn-preview';
+import { ApiConnectionError, ApiError, createThread, interruptThread, submitQuiz } from '@/lib/api';
 import { ChatInput } from '@/components/chat/chat-input';
 import { MessageList } from '@/components/chat/message-list';
 import { DiffDrawer } from '@/components/memory/diff-drawer';
 import { ErrorState } from '@/components/shared/error-state';
 import { Button } from '@/components/ui/button';
+import { QuizFlow } from '@/components/workbench/quiz-flow';
 import { commitBadge, formatDiffStats, shortSha } from '@/lib/commit-format';
 import { cn } from '@/lib/utils';
 
@@ -163,12 +168,32 @@ function WizardChrome({
 function OnboardingChat({
   stream,
   onInterrupt,
+  onSubmitQuiz,
 }: {
   stream: TurnStream;
   onInterrupt: () => void;
+  /** Transport only (REST live, scripted replay in ?preview=1). */
+  onSubmitQuiz: (quizId: string, answers: SubmitQuizRequest['answers']) => Promise<unknown>;
 }) {
   const { step, birthCommit } = deriveStep(stream.state);
   const [drawerCommit, setDrawerCommit] = useState<MemoryCommit | null>(null);
+  const quiz = stream.state.workbench.quiz;
+
+  // Baseline quiz submission mirrors WorkbenchPanel.submitQuiz: optimistic
+  // "grading" phase, rolled back with the error on a failed POST. Verdicts
+  // arrive via quiz.graded on the same thread socket.
+  const finishQuiz = (answers: SubmitQuizRequest['answers']) => {
+    const quizId = quiz.payload?.id;
+    if (!quizId) return;
+    stream.dispatch({ type: 'quiz-submitted' });
+    Promise.resolve(onSubmitQuiz(quizId, answers)).catch((err: unknown) => {
+      stream.dispatch({
+        type: 'quiz-submit-failed',
+        message:
+          err instanceof Error ? err.message : "The answers didn't reach the tutor — try again.",
+      });
+    });
+  };
 
   return (
     <WizardChrome step={step}>
@@ -184,6 +209,32 @@ function OnboardingChat({
               if (lastUser) stream.send(lastUser.text);
             }}
           />
+          {quiz.payload ? (
+            /* Baseline quiz as a step-content card (QA finding F2): the wizard
+               mounts no workbench, so ui_push_quiz pushes render right here.
+               Chat stays usable below — skipping in words remains possible. */
+            <section
+              aria-label="Baseline check"
+              className="mx-4 mb-3 flex h-[min(340px,45dvh)] shrink-0 flex-col overflow-hidden rounded-lg border bg-surface lg:mx-6"
+            >
+              <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-surface-2/50 px-4">
+                <ListChecks className="size-3.5 text-primary" aria-hidden />
+                <span className="font-mono text-caption text-muted-foreground">
+                  baseline check — shapes your starting plan
+                </span>
+              </div>
+              <div className="min-h-0 flex-1">
+                <QuizFlow
+                  key={quiz.payload.id}
+                  quiz={quiz.payload}
+                  phase={quiz.phase}
+                  results={quiz.results}
+                  submitError={quiz.submitError}
+                  onFinish={finishQuiz}
+                />
+              </div>
+            </section>
+          ) : null}
           <ChatInput
             onSend={stream.send}
             onInterrupt={onInterrupt}
@@ -208,7 +259,16 @@ function OnboardingPreview() {
   const stream = useReplayTurnStream(onboardingGreetingScript, {
     getReply: () => onboardingReplyScripts[replyIndex.current++],
   });
-  return <OnboardingChat stream={stream} onInterrupt={() => {}} />;
+  return (
+    <OnboardingChat
+      stream={stream}
+      onInterrupt={() => {}}
+      onSubmitQuiz={() => {
+        stream.replay(onboardingQuizGradedScript, { reset: false });
+        return Promise.resolve();
+      }}
+    />
+  );
 }
 
 /** Live mode: a real onboarding thread against the agent host. */
@@ -220,6 +280,7 @@ function OnboardingLive({ threadId }: { threadId: string }) {
       onInterrupt={() => {
         interruptThread(threadId).catch((err: unknown) => console.warn('interrupt failed', err));
       }}
+      onSubmitQuiz={(quizId, answers) => submitQuiz(quizId, { answers })}
     />
   );
 }

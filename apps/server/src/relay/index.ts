@@ -309,7 +309,9 @@ export class UiToolRelay {
     this.sink.emitToThread(thread.id, { type: 'workbench.exercise', exercise: payload });
 
     return ok(
-      `Exercise ${args.id} is now visible in the learner's workbench editor. Wait for their ` +
+      `Exercise ${args.id} is now visible in the learner's workbench editor. Before this turn ` +
+        `ends, git commit the .exercises/${args.id}/ workdir per the memory skill (e.g. ` +
+        `"system(<topic>): author ${args.id} with hidden tests"). Then wait for their ` +
         'submission — a grading task will arrive when they submit. Do not reveal the hidden ' +
         'tests or the solution, and do not grade until then.',
     );

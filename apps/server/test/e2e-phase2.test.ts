@@ -609,6 +609,18 @@ describe.runIf(enabled)('Phase 2 workbench golden path (real codex)', () => {
       // The user socket received the pass verdict + assessment too (dashboard feeds).
       expect(userSocket.slice('exercise.graded').some((e) => e.verdict === 'passed')).toBe(true);
       expect(userSocket.slice('assessment.recorded').length).toBeGreaterThan(0);
+      // QA finding F8: every memory.commit (grammar or checkpoint) must reach
+      // the USER socket — that's what MemoryCommitProvider toasts from. Each
+      // commit the thread socket saw must have landed there too, by sha.
+      const userCommitShas = new Set(userSocket.slice('memory.commit').map((e) => e.commit.sha));
+      const threadCommits = t.slice('memory.commit');
+      expect(threadCommits.length, 'thread socket saw memory commits').toBeGreaterThan(0);
+      for (const { commit } of threadCommits) {
+        expect(
+          userCommitShas.has(commit.sha),
+          `commit ${commit.sha.slice(0, 7)} "${commit.headline}" reached the user socket`,
+        ).toBe(true);
+      }
 
       // Learner-model ground truth: mastery file changed and stayed valid.
       const model = await services!.workspaces.readLearnerModel(me.id);

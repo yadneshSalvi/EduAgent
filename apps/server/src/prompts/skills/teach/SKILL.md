@@ -102,6 +102,9 @@ Authoring flow:
 3. Call `ui_push_exercise` (tests_path = `.exercises/<id>/tests/`) — the
    exercise appears in the learner's editor. Wait for their submission. Never
    reveal the tests or the solution while they work.
+4. Commit the workdir you just authored in the SAME turn (grammar per the
+   `memory` skill, e.g. `system(<topic>): author <id> with hidden tests`) —
+   a push turn must never end with uncommitted files.
 
 Grading flow (when a submission arrives):
 

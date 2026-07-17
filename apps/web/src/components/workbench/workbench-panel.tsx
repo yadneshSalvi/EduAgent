@@ -14,10 +14,12 @@ import { QuizFlow } from './quiz-flow';
 
 /**
  * The workbench pane (plans/04 §3): Exercise · Quiz · Artifact tabs beside the
- * chat (stacked under it < md). A workbench.* push slides it open and switches
- * to that tab (UI motion class via CSS width/height transition); explicit
- * collapse/expand persists per thread. All three tabs stay mounted so editor
- * code and in-progress quiz answers survive tab switches.
+ * chat (stacked under it below lg — md: starts AT 768px, which squeezed a
+ * 768px tablet side-by-side, QA finding F5). A workbench.* push slides it
+ * open and switches to that tab (UI motion class via CSS width/height
+ * transition); explicit collapse/expand persists per thread. All three tabs
+ * stay mounted so editor code and in-progress quiz answers survive tab
+ * switches.
  */
 const TABS: Array<{ tab: WorkbenchTab; label: string; icon: typeof Code2 }> = [
   { tab: 'exercise', label: 'Exercise', icon: Code2 },
@@ -118,9 +120,9 @@ export function WorkbenchPanel({
     <aside
       aria-label="Workbench"
       className={cn(
-        'relative flex min-h-0 shrink-0 flex-col overflow-hidden border-t bg-surface md:h-auto md:border-l md:border-t-0',
+        'relative flex min-h-0 shrink-0 flex-col overflow-hidden border-t bg-surface lg:h-auto lg:border-l lg:border-t-0',
         'transition-[width,height] duration-[240ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none',
-        open ? 'h-[45%] md:w-[45%] md:min-w-[380px]' : 'h-11 md:w-11',
+        open ? 'h-[45%] lg:w-[45%] lg:min-w-[380px]' : 'h-11 lg:w-11',
       )}
     >
       {/* Open content stays mounted while collapsed (hidden) so editor code
@@ -232,12 +234,12 @@ export function WorkbenchPanel({
 
       {!open ? (
         <>
-          {/* Collapsed, < md: slim horizontal strip under the chat. */}
+          {/* Collapsed, < lg: slim horizontal strip under the chat. */}
           <button
             type="button"
             onClick={() => toggle(true)}
             aria-label="Open workbench"
-            className="flex h-11 w-full items-center gap-2 px-4 text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground md:hidden"
+            className="flex h-11 w-full items-center gap-2 px-4 text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground lg:hidden"
           >
             <PanelRightOpen className="size-4 rotate-90" aria-hidden />
             <span className="font-mono text-caption tracking-wide">workbench</span>
@@ -246,8 +248,8 @@ export function WorkbenchPanel({
             )}
           </button>
 
-          {/* Collapsed, md+: vertical rail with per-tab shortcuts. */}
-          <div className="hidden h-full flex-col items-center gap-2 py-3 md:flex">
+          {/* Collapsed, lg+: vertical rail with per-tab shortcuts. */}
+          <div className="hidden h-full flex-col items-center gap-2 py-3 lg:flex">
             <button
               type="button"
               onClick={() => toggle(true)}
