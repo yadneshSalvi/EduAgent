@@ -39,8 +39,13 @@ function arcPath(deg: number): string {
   return `M ${start.x} ${start.y} A ${RADIUS} ${RADIUS} 0 ${largeArc} 1 ${end.x} ${end.y}`;
 }
 
-function GaugeDial({ score }: { score: number }) {
-  const ticked = useTickedNumber(score, { from: 0, durationMs: 900 });
+/**
+ * The dial alone, exported for the exam-results sweep (plans/05 §7 gauge
+ * reuse): `from` sets where the tick starts (dashboard mounts from 0; results
+ * sweep readiness_before → readiness_after).
+ */
+export function GaugeDial({ score, from = 0 }: { score: number; from?: number }) {
+  const ticked = useTickedNumber(score, { from, durationMs: 900 });
   const color = masteryColor(ticked / 100);
   return (
     <div className="relative" style={{ width: SIZE, height: SIZE }}>

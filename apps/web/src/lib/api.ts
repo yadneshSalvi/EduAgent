@@ -1,10 +1,14 @@
 import { z } from 'zod';
 import {
   apiErrorSchema,
+  createExamRequestSchema,
+  createExamResponseSchema,
   createThreadRequestSchema,
   createThreadResponseSchema,
   dashboardDataSchema,
+  examDtoSchema,
   exerciseDtoSchema,
+  listExamsResponseSchema,
   listThreadsResponseSchema,
   localLoginRequestSchema,
   localUsersResponseSchema,
@@ -15,15 +19,22 @@ import {
   memoryTreeResponseSchema,
   okResponseSchema,
   reviewQueueResponseSchema,
+  saveExamAnswersRequestSchema,
+  startExamResponseSchema,
   startReviewResponseSchema,
   submitExerciseRequestSchema,
   submitExerciseResponseSchema,
   submitQuizRequestSchema,
   threadItemsResponseSchema,
+  type CreateExamRequest,
+  type CreateExamResponse,
   type CreateThreadRequest,
   type CreateThreadResponse,
   type DashboardData,
+  type ExamAnswers,
+  type ExamDto,
   type ExerciseDto,
+  type ListExamsResponse,
   type ListThreadsResponse,
   type LocalLoginRequest,
   type LocalUsersResponse,
@@ -34,6 +45,7 @@ import {
   type MemoryTreeResponse,
   type OkResponse,
   type ReviewQueueResponse,
+  type StartExamResponse,
   type StartReviewResponse,
   type SubmitExerciseRequest,
   type SubmitExerciseResponse,
@@ -264,6 +276,59 @@ export function submitQuiz(quizId: string, request: SubmitQuizRequest): Promise<
   return apiFetch(`/api/quiz/${encodeURIComponent(quizId)}/submit`, {
     method: 'POST',
     body: submitQuizRequestSchema.parse(request),
+    schema: okResponseSchema,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Exams (plans/03 §3.5, §7)
+// ---------------------------------------------------------------------------
+
+/** Fire-and-forget: generation runs on a forked thread server-side. */
+export function createExam(request: CreateExamRequest): Promise<CreateExamResponse> {
+  return apiFetch('/api/exams', {
+    method: 'POST',
+    body: createExamRequestSchema.parse(request),
+    schema: createExamResponseSchema,
+  });
+}
+
+/** Newest first. */
+export function listExams(signal?: AbortSignal): Promise<ListExamsResponse> {
+  return apiFetch('/api/exams', { schema: listExamsResponseSchema, signal });
+}
+
+/** `questions` stays null while the exam is a draft — never render a draft. */
+export function getExam(examId: string, signal?: AbortSignal): Promise<ExamDto> {
+  return apiFetch(`/api/exams/${encodeURIComponent(examId)}`, { schema: examDtoSchema, signal });
+}
+
+/** Idempotent while in_progress — safe to re-fetch the deadline on reconnect. */
+export function startExam(examId: string): Promise<StartExamResponse> {
+  return apiFetch(`/api/exams/${encodeURIComponent(examId)}/start`, {
+    method: 'POST',
+    schema: startExamResponseSchema,
+  });
+}
+
+/** 15s autosave; 409 deadline_passed / invalid_state surface as ApiError. */
+export function saveExamAnswers(examId: string, answers: ExamAnswers): Promise<OkResponse> {
+  return apiFetch(`/api/exams/${encodeURIComponent(examId)}/answers`, {
+    method: 'PUT',
+    body: saveExamAnswersRequestSchema.parse({ answers }),
+    schema: okResponseSchema,
+  });
+}
+
+/**
+ * Past the server grace the body is ignored and the last autosave is graded.
+ * Re-POSTing a `submitted` exam retries a failed grading turn (409
+ * invalid_state "being graded" while one is in flight).
+ */
+export function submitExam(examId: string, answers: ExamAnswers): Promise<OkResponse> {
+  return apiFetch(`/api/exams/${encodeURIComponent(examId)}/submit`, {
+    method: 'POST',
+    body: saveExamAnswersRequestSchema.parse({ answers }),
     schema: okResponseSchema,
   });
 }

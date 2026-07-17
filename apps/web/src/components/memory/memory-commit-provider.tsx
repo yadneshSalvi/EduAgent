@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { MemoryCommit } from '@eduagent/shared';
+import type { MemoryCommit, WsEvent } from '@eduagent/shared';
 import { parseWsFrame } from '@/hooks/use-turn-stream';
 import { userSocketUrl } from '@/lib/api';
 import { CommitToast } from './commit-toast';
@@ -29,6 +29,12 @@ interface MemoryCommitContextValue {
   publishCommit: (commit: MemoryCommit) => void;
   /** Open the Diff Drawer directly (timeline "view diff", exam results…). */
   openDrawer: (commit: MemoryCommit) => void;
+  /**
+   * Every parsed event from the user socket (exam.created, exam.graded,
+   * turn.* for the user's threads…) — exam surfaces subscribe here instead of
+   * opening a second /ws/user connection. Returns the unsubscriber.
+   */
+  subscribeUserEvents: (listener: (event: WsEvent) => void) => () => void;
 }
 
 const MemoryCommitContext = createContext<MemoryCommitContextValue | null>(null);
@@ -39,6 +45,17 @@ export function useMemoryCommits(): MemoryCommitContextValue {
   return ctx;
 }
 
+/** Subscribe to user-socket events for this component's lifetime (ref'd handler). */
+export function useUserSocketEvents(handler: (event: WsEvent) => void): void {
+  const { subscribeUserEvents } = useMemoryCommits();
+  const handlerRef = useRef(handler);
+  handlerRef.current = handler;
+  useEffect(
+    () => subscribeUserEvents((event) => handlerRef.current(event)),
+    [subscribeUserEvents],
+  );
+}
+
 const MAX_TOASTS = 3;
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30_000;
@@ -47,7 +64,13 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<MemoryCommit[]>([]);
   const [drawerCommit, setDrawerCommit] = useState<MemoryCommit | null>(null);
   const seenShas = useRef(new Set<string>());
+  const userListeners = useRef(new Set<(event: WsEvent) => void>());
   const queryClient = useQueryClient();
+
+  const subscribeUserEvents = useCallback((listener: (event: WsEvent) => void) => {
+    userListeners.current.add(listener);
+    return () => void userListeners.current.delete(listener);
+  }, []);
 
   const publishCommit = useCallback(
     (commit: MemoryCommit) => {
@@ -91,7 +114,9 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
       ws.onmessage = (messageEvent) => {
         if (disposed) return;
         const event = parseWsFrame(messageEvent.data);
-        if (event?.type === 'memory.commit') publishCommit(event.commit);
+        if (!event) return;
+        if (event.type === 'memory.commit') publishCommit(event.commit);
+        for (const listener of userListeners.current) listener(event);
       };
       ws.onclose = (closeEvent) => {
         if (disposed || closeEvent.code === 4401) return;
@@ -108,7 +133,10 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
     };
   }, [publishCommit]);
 
-  const value = useMemo(() => ({ publishCommit, openDrawer }), [publishCommit, openDrawer]);
+  const value = useMemo(
+    () => ({ publishCommit, openDrawer, subscribeUserEvents }),
+    [publishCommit, openDrawer, subscribeUserEvents],
+  );
 
   return (
     <MemoryCommitContext.Provider value={value}>

@@ -85,7 +85,13 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
   app.decorate('resolveUser', (req: FastifyRequest) => authProvider.resolveUser(req));
 
   await app.register(cookie, { secret: config.sessionSecret });
-  await app.register(cors, { origin: config.corsOrigins, credentials: true });
+  await app.register(cors, {
+    origin: config.corsOrigins,
+    credentials: true,
+    // @fastify/cors defaults to GET,HEAD,POST — without PUT/PATCH the browser
+    // preflight rejects exam autosave (PUT /api/exams/:id/answers) and PATCH /api/me
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  });
   await app.register(websocket);
 
   const resolved = typeof services === 'function' ? await services(app) : services;
