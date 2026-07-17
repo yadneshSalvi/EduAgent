@@ -15,6 +15,7 @@ import { createTestDbUrl } from './helpers/test-db.js';
 const idleThreads: ThreadService = {
   ensureThread: () => Promise.reject(new Error('not used')),
   startTurn: () => Promise.resolve(),
+  startSystemTurn: () => Promise.resolve(),
   interrupt: () => Promise.resolve(),
   turnInFlight: () => false,
   inFlightThreads: () => [],

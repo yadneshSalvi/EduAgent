@@ -216,3 +216,68 @@ export const uiToolArgSchemas = {
 } as const;
 export type UiToolName = keyof typeof uiToolArgSchemas;
 export type UiToolArgs = { [K in UiToolName]: z.infer<(typeof uiToolArgSchemas)[K]> };
+
+export const UI_TOOL_NAMES = Object.keys(uiToolArgSchemas) as UiToolName[];
+
+export function isUiToolName(name: string): name is UiToolName {
+  return Object.prototype.hasOwnProperty.call(uiToolArgSchemas, name);
+}
+
+/**
+ * Model-facing tool descriptions (`03` §5). Rendered into the MCP tool
+ * definitions by `packages/mcp-ui-tools`; written as guardrails — they state
+ * the preconditions the teach skill enforces.
+ */
+export const uiToolDescriptions: Record<UiToolName, string> = {
+  ui_push_exercise:
+    'Show a coding exercise in the learner’s workbench editor. Call ONLY after you have ' +
+    'created `.exercises/<id>/` with prompt.md, the starter file, a reference solution, and ' +
+    'hidden tests under `.exercises/<id>/tests/` that fail on the starter and pass on your ' +
+    'solution. After pushing, wait for the submission — never reveal tests or solution.',
+  ui_push_quiz:
+    'Render an interactive quiz in the workbench. Include `answer` for mcq and predict_output ' +
+    'questions (checked instantly client-side); short answers come back to you for grading via ' +
+    'ui_grade_quiz when the learner submits.',
+  ui_push_artifact:
+    'Render a self-contained HTML visualization in the workbench (sandboxed iframe, no external ' +
+    'resources). Use when a visual genuinely beats prose.',
+  ui_grade_exercise:
+    'Deliver the verdict for a submitted exercise AFTER actually running its hidden tests in ' +
+    'your sandbox. Feedback: what passed, what failed and why, one targeted hint — never the ' +
+    'full solution on a first failure.',
+  ui_grade_quiz:
+    'Deliver per-question verdicts and feedback for a submitted quiz (grade the short answers; ' +
+    'mcq/predict_output results arrive with the submission as evidence).',
+  ui_record_assessment:
+    'Record concept mastery deltas (with evidence) so the learner’s dashboard updates live. ' +
+    'The numbers MUST match the mastery-file changes you commit — file first, then this call.',
+  ui_create_exam:
+    'Persist a generated exam (sections → questions). Write hidden tests for every coding ' +
+    'question under `.exercises/exam-<examId>-<qid>/tests/` BEFORE calling this.',
+  ui_grade_exam:
+    'Deliver per-question exam grades, the total, and the readiness delta after grading every ' +
+    'answer (run coding answers against their tests; rubric-grade short answers).',
+};
+
+// ---------------------------------------------------------------------------
+// Relay wire (packages/mcp-ui-tools → UiToolRelay, localhost HTTP — `03` §4)
+// ---------------------------------------------------------------------------
+
+/** POST /tool-call body. `args` stays opaque here; the relay parses per-tool. */
+export const relayToolCallRequestSchema = z.object({
+  tool: z.string().min(1),
+  args: z.unknown(),
+  sessionToken: z.string(),
+});
+export type RelayToolCallRequest = z.infer<typeof relayToolCallRequestSchema>;
+
+/**
+ * Relay responses in both shapes carry a model-facing string: `message` on
+ * success, `error` on failure — instructive either way (the agent reads tool
+ * results and must be able to self-correct).
+ */
+export const relayToolCallResponseSchema = z.union([
+  z.object({ ok: z.literal(true), message: z.string().min(1) }),
+  z.object({ ok: z.literal(false), error: z.string().min(1) }),
+]);
+export type RelayToolCallResponse = z.infer<typeof relayToolCallResponseSchema>;

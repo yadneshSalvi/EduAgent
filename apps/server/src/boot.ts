@@ -1,33 +1,44 @@
 /**
- * Phase 1 service wiring (plans/03 §3.4 boot order): WorkspaceManager +
- * skills → AppServerClient (spawn codex) → MemoryPipeline → ThreadManager →
- * WsGateway. Shared by src/index.ts and the gated golden-path E2E so the test
- * boots the exact production graph.
+ * Service wiring (plans/03 §1 boot order): WorkspaceManager + skills →
+ * UiToolRelay (listening BEFORE codex spawns, so the first tool call always
+ * has a live relay) → AppServerClient (spawn codex with the eduagent-ui MCP
+ * registration) → MemoryPipeline → ThreadManager → WsGateway. Shared by
+ * src/index.ts and the gated E2Es so tests boot the exact production graph.
  */
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
 import { WsGateway } from './api/gateway.js';
 import { AppServerClient, type CodexLogger, type ElicitationApprover, type HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
 import { installedSkillsRoot, SKILL_NAMES } from './prompts/index.js';
+import { UiToolRelay } from './relay/index.js';
 import { ThreadManager } from './threads/index.js';
 import { MemoryPipeline, WorkspaceManager } from './workspace/index.js';
 
-/**
- * The MCP registration name the ui-tools server will use (plans/01 §4.5).
- * Phase 2 registers it and pins `ctx.serverName === UI_TOOLS_SERVER_NAME`
- * here; until then no MCP server is registered, so the approvalKind + tool
- * prefix checks are the whole policy.
- */
+/** The MCP registration name for the ui-tools server (plans/01 §4.5). */
 export const UI_TOOLS_SERVER_NAME = 'eduagent-ui';
 
+/**
+ * Elicitation policy (PROTOCOL_NOTES §8): auto-accept MCP tool-call approvals
+ * only for ui_* tools coming from OUR registered server (Phase 2 carry-over a
+ * — the server-name pin keeps a look-alike tool on any other MCP server from
+ * riding the allowlist). Everything else is declined and warn-logged.
+ */
 export const uiToolElicitationApprover: ElicitationApprover = (ctx) =>
-  ctx.approvalKind === 'mcp_tool_call' && ctx.toolName !== null && ctx.toolName.startsWith('ui_');
+  ctx.approvalKind === 'mcp_tool_call' &&
+  ctx.serverName === UI_TOOLS_SERVER_NAME &&
+  ctx.toolName !== null &&
+  ctx.toolName.startsWith('ui_');
 
 export interface AppServices {
   workspaces: WorkspaceManager;
   threads: ThreadManager;
   gateway: WsGateway;
   client: AppServerClient;
+  relay: UiToolRelay;
+  /** The port the relay actually bound (config.relayPort, or ephemeral in tests). */
+  relayPort: number;
   codexHealth: () => Promise<HealthProbe>;
 }
 
@@ -47,6 +58,12 @@ export async function createServices({
 
   const gateway = new WsGateway(logger);
 
+  const relay = new UiToolRelay(
+    { prisma, sink: gateway, workspaces, logger },
+    { port: config.relayPort },
+  );
+  const relayPort = await relay.listen();
+
   let threads: ThreadManager | null = null;
   const client = new AppServerClient({
     codexBin: config.codexBin,
@@ -54,6 +71,9 @@ export async function createServices({
     logger,
     approveElicitation: uiToolElicitationApprover,
     onRestarted: () => threads?.resumeAll(),
+    mcpServers: {
+      [UI_TOOLS_SERVER_NAME]: uiToolsServerSpec(config, relayPort),
+    },
     // codex 0.144.4 has no ancestor-walk skill discovery — the installed
     // skills root must be registered explicitly (QA finding M2).
     skillsExtraRoots: [installedSkillsRoot(config.dataDir)],
@@ -61,13 +81,47 @@ export async function createServices({
     // codex to a dedicated authenticated home when configured (plans/08 §3).
     ...(config.codexHome ? { env: { CODEX_HOME: config.codexHome } } : {}),
   });
-  await client.start();
-  await assertSkillsVisible(client, config, logger);
+  try {
+    await client.start();
+    await assertSkillsVisible(client, config, logger);
+    await assertUiToolsVisible(client, logger);
+  } catch (err) {
+    await relay.close();
+    throw err;
+  }
 
   const memory = new MemoryPipeline({ workspaces, prisma, emitter: gateway, logger });
   threads = new ThreadManager({ prisma, client, workspaces, memory, sink: gateway, logger });
 
-  return { workspaces, threads, gateway, client, codexHealth: () => client.healthProbe() };
+  return {
+    workspaces,
+    threads,
+    gateway,
+    client,
+    relay,
+    relayPort,
+    codexHealth: () => client.healthProbe(),
+  };
+}
+
+/**
+ * The eduagent-ui registration codex spawns (plans/01 §1): node running the
+ * mcp-ui-tools TS entry through the tsx CLI (this repo runs all non-bundled
+ * TS from source — plans/01 §2), with the relay port in env (`-c
+ * mcp_servers.*.env` table rendering verified live, PROTOCOL_NOTES §8).
+ */
+export function uiToolsServerSpec(
+  config: Pick<AppConfig, 'repoRoot'>,
+  relayPort: number,
+): { command: string; args: string[]; env: Record<string, string> } {
+  const require = createRequire(import.meta.url);
+  const tsxCli = require.resolve('tsx/cli');
+  const entry = path.join(config.repoRoot, 'packages', 'mcp-ui-tools', 'src', 'index.ts');
+  return {
+    command: process.execPath,
+    args: [tsxCli, entry],
+    env: { RELAY_PORT: String(relayPort) },
+  };
 }
 
 /**
@@ -93,4 +147,22 @@ async function assertSkillsVisible(
     );
   }
   logger.info({ skills: SKILL_NAMES }, 'codex skills visible via skills/list');
+}
+
+/**
+ * Boot-time proof that codex spawned the eduagent-ui MCP server and can list
+ * its tools — a broken registration would otherwise surface only as baffling
+ * mid-lesson tool failures.
+ */
+async function assertUiToolsVisible(client: AppServerClient, logger: CodexLogger): Promise<void> {
+  const status = await client.listMcpServerStatus();
+  const entry = status.data.find((server) => server.name === UI_TOOLS_SERVER_NAME);
+  const toolNames = Object.keys(entry?.tools ?? {});
+  if (entry === undefined || toolNames.length === 0) {
+    throw new Error(
+      `codex did not report the "${UI_TOOLS_SERVER_NAME}" MCP server (or it exposes no tools) — ` +
+        'check the mcp_servers spawn overrides and the mcp-ui-tools entry (see codex stderr in logs)',
+    );
+  }
+  logger.info({ tools: toolNames }, 'eduagent-ui MCP tools visible via mcpServerStatus/list');
 }

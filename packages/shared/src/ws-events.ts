@@ -48,6 +48,7 @@ export const wsEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('turn.completed'), threadId: z.string().min(1) }),
   z.object({
     type: z.literal('turn.error'),
+    threadId: z.string().min(1),
     message: z.string().min(1),
     retryable: z.boolean(),
   }),

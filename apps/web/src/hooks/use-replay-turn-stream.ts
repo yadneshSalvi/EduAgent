@@ -7,6 +7,7 @@ import {
   turnStreamReducer,
   type TurnStream,
   type TurnStreamAction,
+  type WorkbenchClientAction,
 } from './use-turn-stream';
 import type { ReplayStep } from '@/lib/fixtures/turn-preview';
 
@@ -86,5 +87,7 @@ export function useReplayTurnStream(
     [replay],
   );
 
-  return { state, send, refetchHistory: () => {}, replay };
+  const dispatchClient = useCallback((action: WorkbenchClientAction) => dispatch(action), []);
+
+  return { state, send, refetchHistory: () => {}, replay, dispatch: dispatchClient };
 }

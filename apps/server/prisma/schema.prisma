@@ -66,8 +66,12 @@ model ItemMirror {
   @@index([threadId, createdAt])
 }
 
+// Client/agent-facing exercise id is `slug` (agent-supplied, unique only per
+// workspace — plans/02 §5 made it the PK, which collides at the second user).
+// The cuid `id` never leaves the server.
 model Exercise {
-  id          String   @id // agent-supplied slug, e.g. "ex-014"
+  id          String   @id @default(cuid())
+  slug        String // agent-supplied slug, e.g. "ex-014"
   userId      String
   user        User     @relation(fields: [userId], references: [id])
   threadId    String
@@ -80,6 +84,8 @@ model Exercise {
   status      String   @default("open") // open | passed | failed | abandoned
   createdAt   DateTime @default(now())
   attempts    ExerciseAttempt[]
+
+  @@unique([userId, slug])
 }
 
 model ExerciseAttempt {

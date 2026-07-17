@@ -1,8 +1,9 @@
 /**
  * ThreadManager (plans/03 §3.1): owns the Thread row ⇄ codex thread mapping,
  * serializes turns per thread, prepends the per-turn context envelope, maps
- * codex thread events onto the shared WsEvent union for the gateway, and is
- * the ONLY writer of ItemMirror rows.
+ * codex thread events onto the shared WsEvent union for the gateway, and
+ * mirrors turn items to ItemMirror (the UiToolRelay also mirrors its
+ * exercise/quiz pushes).
  *
  * Mode note (web contract, apps/web onboarding-wizard): the web always
  * creates `mode:"learn"` threads; a learner without a committed profile.md
@@ -45,6 +46,13 @@ export interface ThreadService {
     opts?: { topicSlug?: string | null },
   ): Promise<EnsureThreadResult>;
   startTurn(thread: Thread, userText: string): Promise<void>;
+  /**
+   * Server-initiated turn (exercise/quiz grading, plans/03 §3.5): mirrored
+   * with role "system" so it never renders as a learner message. `caption`
+   * is the short human line the chat shows for this row on history reload —
+   * without it the FULL internal instruction text would render.
+   */
+  startSystemTurn(thread: Thread, text: string, opts?: { caption?: string }): Promise<void>;
   interrupt(threadId: string): Promise<void>;
   turnInFlight(threadId: string): boolean;
   /** Thread row ids of this user's in-flight turns (reconnect snapshot). */
@@ -76,6 +84,19 @@ interface InFlightTurn {
   codexThreadId: string;
 }
 
+/**
+ * Completion waiter for one turn. `expectedTurnId` is null between sending
+ * turn/start and its response; matching completions arriving in that window
+ * are buffered (bufferedOutcomes) and consumed once the id is known. A
+ * completion whose turn id matches neither is STALE (e.g. the previous turn
+ * finishing after its fail-safe fired) and must never settle this waiter —
+ * the Phase 1 carry-over (c) bug.
+ */
+interface TurnWaiter {
+  expectedTurnId: string | null;
+  resolve: (outcome: TurnOutcome) => void;
+}
+
 const NOOP_LOGGER: CodexLogger = { debug() {}, info() {}, warn() {}, error() {} };
 
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
@@ -103,14 +124,21 @@ export class ThreadManager implements ThreadService {
   private readonly resumedThreads = new Set<string>();
   /** codexThreadId → unsubscribe for the event fan-in (one per thread). */
   private readonly subscriptions = new Map<string, () => void>();
-  /** Per-thread turn serialization (thread row id → queue tail). */
+  /**
+   * Per-WORKSPACE turn serialization (userId → queue tail). Grading turns
+   * made same-workspace concurrency real (Phase 2 carry-over b): two threads
+   * of one user overlapping would double-emit commits from overlapping
+   * sinceSha ranges, and one turn's checkpoint could sweep the other's writes.
+   */
   private readonly turnQueues = new Map<string, Promise<unknown>>();
   /** Per-thread sequential ItemMirror writes (preserves createdAt ordering). */
   private readonly mirrorQueues = new Map<string, Promise<unknown>>();
-  /** thread row id → the one in-flight turn (turns are serialized per thread). */
+  /** thread row id → the one in-flight turn (turns are serialized per workspace). */
   private readonly inFlight = new Map<string, InFlightTurn>();
-  /** thread row id → resolver for the in-flight turn's outcome. */
-  private readonly turnWaiters = new Map<string, (outcome: TurnOutcome) => void>();
+  /** thread row id → waiter for the in-flight turn's outcome (matched by turn id). */
+  private readonly turnWaiters = new Map<string, TurnWaiter>();
+  /** thread row id → codex turn id → outcome that arrived before the waiter knew its id. */
+  private readonly bufferedOutcomes = new Map<string, Map<string, TurnOutcome>>();
   /** ensureThread races: one create per (user, mode, topic) key at a time. */
   private readonly pendingEnsures = new Map<string, Promise<EnsureThreadResult>>();
   /** thread/resume races: one resume per codex thread at a time. */
@@ -164,6 +192,10 @@ export class ThreadManager implements ThreadService {
    */
   startTurn(thread: Thread, userText: string): Promise<void> {
     return this.enqueueTurn(thread, userText, 'user');
+  }
+
+  startSystemTurn(thread: Thread, text: string, opts?: { caption?: string }): Promise<void> {
+    return this.enqueueTurn(thread, text, 'system', opts?.caption ?? null);
   }
 
   /** Interrupts the thread's in-flight turn, if any (no-op otherwise). */
@@ -266,6 +298,7 @@ export class ThreadManager implements ThreadService {
       this.log.error({ err, threadId: thread.id }, 'greeting turn failed');
       this.emitTurnEvent(thread, {
         type: 'turn.error',
+        threadId: thread.id,
         message: 'The tutor could not open the session. Send a message to try again.',
         retryable: true,
       });
@@ -340,11 +373,24 @@ export class ThreadManager implements ThreadService {
 
   // ------------------------------------------------------------------- turns
 
-  private enqueueTurn(thread: Thread, text: string, role: 'user' | 'system'): Promise<void> {
-    return this.enqueue(this.turnQueues, thread.id, () => this.runTurn(thread, text, role));
+  private enqueueTurn(
+    thread: Thread,
+    text: string,
+    role: 'user' | 'system',
+    caption: string | null = null,
+  ): Promise<void> {
+    // Keyed by USER: all of a workspace's threads share one turn at a time.
+    return this.enqueue(this.turnQueues, thread.userId, () =>
+      this.runTurn(thread, text, role, caption),
+    );
   }
 
-  private async runTurn(thread: Thread, text: string, role: 'user' | 'system'): Promise<void> {
+  private async runTurn(
+    thread: Thread,
+    text: string,
+    role: 'user' | 'system',
+    caption: string | null = null,
+  ): Promise<void> {
     await this.ensureResumed(thread);
 
     const model = await this.workspaces.readLearnerModel(thread.userId);
@@ -352,22 +398,28 @@ export class ThreadManager implements ThreadService {
     const input = buildContextEnvelope(digest, { needsRepair: model.needsRepair }) + text;
     const sinceSha = await this.memory.beforeTurn(thread.userId);
 
-    // The mirror stores the RAW text (the envelope is wire-only context).
+    // The mirror stores the RAW text (the envelope is wire-only context);
+    // system rows also carry the short chat-facing caption when given.
     await this.mirrorWrite(thread.id, {
       threadId: thread.id,
       role,
       kind: 'message',
-      payload: { text },
+      payload: caption === null ? { text } : { text, caption },
     });
     await this.prisma.thread.update({
       where: { id: thread.id },
       data: { lastActiveAt: new Date() },
     });
 
-    // Waiter registered before turn/start: completion events can never race it.
+    // Waiter registered before turn/start: completion events can never race
+    // it. It settles ONLY on outcomes matching its own turn id — a previous
+    // turn completing late (after the fail-safe already gave up on it) must
+    // not settle this one (Phase 1 carry-over c).
     let timeout: NodeJS.Timeout | null = null;
+    let waiter!: TurnWaiter;
     const completion = new Promise<TurnOutcome>((resolve) => {
-      this.turnWaiters.set(thread.id, resolve);
+      waiter = { expectedTurnId: null, resolve };
+      this.turnWaiters.set(thread.id, waiter);
       timeout = setTimeout(() => {
         resolve({
           kind: 'aborted',
@@ -388,9 +440,16 @@ export class ThreadManager implements ThreadService {
       turnId = response.turn.id;
     } catch (err) {
       this.turnWaiters.delete(thread.id);
+      this.bufferedOutcomes.delete(thread.id);
       if (timeout !== null) clearTimeout(timeout);
       throw err;
     }
+    waiter.expectedTurnId = turnId;
+    // A very fast turn can complete while turn/start's response is still in
+    // this thread's microtask queue — consume anything buffered meanwhile.
+    const buffered = this.bufferedOutcomes.get(thread.id)?.get(turnId);
+    this.bufferedOutcomes.delete(thread.id);
+    if (buffered !== undefined) waiter.resolve(buffered);
     this.inFlight.set(thread.id, {
       turnId,
       userId: thread.userId,
@@ -401,6 +460,7 @@ export class ThreadManager implements ThreadService {
     const outcome = await completion;
     if (timeout !== null) clearTimeout(timeout);
     this.turnWaiters.delete(thread.id);
+    this.bufferedOutcomes.delete(thread.id);
     this.inFlight.delete(thread.id);
     // Queued ItemMirror writes land before the pipeline + completion events —
     // clients refetch items when a turn settles.
@@ -412,6 +472,7 @@ export class ThreadManager implements ThreadService {
       this.log.warn({ threadId: thread.id, turnId, message: outcome.message }, 'turn aborted');
       this.emitTurnEvent(thread, {
         type: 'turn.error',
+        threadId: thread.id,
         message: 'The tutor lost its train of thought (backend restarted). Try again.',
         retryable: true,
       });
@@ -437,6 +498,7 @@ export class ThreadManager implements ThreadService {
     if (outcome.status === 'failed') {
       this.emitTurnEvent(thread, {
         type: 'turn.error',
+        threadId: thread.id,
         message: outcome.errorMessage ?? 'The turn failed. Try again.',
         retryable: true,
       });
@@ -486,30 +548,48 @@ export class ThreadManager implements ThreadService {
       case 'itemCompleted':
         this.handleItemCompleted(thread, event.item);
         return;
-      case 'turnCompleted': {
-        const waiter = this.turnWaiters.get(thread.id);
-        if (!waiter) {
-          this.log.warn(
-            { threadId: thread.id, turnId: event.turn.id, status: event.turn.status },
-            'turn completed with no waiter — ignoring',
-          );
-          return;
-        }
-        waiter({
+      case 'turnCompleted':
+        this.settleTurn(thread, event.turn.id, {
           kind: 'completed',
           status: event.turn.status,
           errorMessage: event.turn.error?.message ?? null,
         });
         return;
-      }
-      case 'turnAborted': {
-        const waiter = this.turnWaiters.get(thread.id);
-        waiter?.({ kind: 'aborted', message: event.error.message });
+      case 'turnAborted':
+        this.settleTurn(thread, event.turnId, { kind: 'aborted', message: event.error.message });
         return;
-      }
       default:
         return; // status/tokenUsage/plan/diff/raw — nothing to surface yet
     }
+  }
+
+  /**
+   * Routes a turn outcome to the thread's waiter iff the turn ids match;
+   * buffers it when the waiter doesn't know its id yet (turn/start response
+   * still in flight); drops it as stale otherwise (carry-over c: a late
+   * completion must never settle a newer queued turn).
+   */
+  private settleTurn(thread: Thread, turnId: string, outcome: TurnOutcome): void {
+    const waiter = this.turnWaiters.get(thread.id);
+    if (waiter !== undefined && waiter.expectedTurnId === turnId) {
+      waiter.resolve(outcome);
+      return;
+    }
+    if (waiter !== undefined && waiter.expectedTurnId === null) {
+      let byTurn = this.bufferedOutcomes.get(thread.id);
+      if (byTurn === undefined) {
+        byTurn = new Map();
+        this.bufferedOutcomes.set(thread.id, byTurn);
+      }
+      byTurn.set(turnId, outcome);
+      return;
+    }
+    this.log.warn(
+      { threadId: thread.id, turnId, outcome: outcome.kind },
+      waiter === undefined
+        ? 'turn settled with no waiter — ignoring'
+        : 'stale turn completion (fail-safe already gave up on it) — ignoring',
+    );
   }
 
   private handleItemCompleted(thread: Thread, item: CodexItem): void {

@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { wsEventSchema, type ThreadItem, type WsEvent } from '@eduagent/shared';
+import type { ExerciseDto } from '@eduagent/shared';
 import {
+  deriveWorkbenchHydration,
+  hydratedExerciseState,
   initialTurnStreamState,
   parseWsFrame,
   threadItemToChatMessage,
@@ -9,11 +12,20 @@ import {
   type TurnStreamState,
 } from './use-turn-stream';
 import {
+  ARTIFACT_PAYLOAD,
+  EXERCISE_PAYLOAD,
   GREETING_COMMIT,
+  QUIZ_PAYLOAD,
+  artifactTurnScript,
   errorTurnScript,
+  exerciseFailTurnScript,
+  exercisePassTurnScript,
+  exerciseTurnScript,
   greetingTurnScript,
   onboardingGreetingScript,
   onboardingReplyScripts,
+  quizGradedTurnScript,
+  quizTurnScript,
   replyTurnScript,
 } from '@/lib/fixtures/turn-preview';
 
@@ -29,6 +41,12 @@ describe('fixtures', () => {
       errorTurnScript,
       onboardingGreetingScript,
       ...onboardingReplyScripts,
+      exerciseTurnScript,
+      exerciseFailTurnScript,
+      exercisePassTurnScript,
+      quizTurnScript,
+      quizGradedTurnScript,
+      artifactTurnScript,
     ];
     for (const script of scripts) {
       for (const step of script) {
@@ -39,7 +57,17 @@ describe('fixtures', () => {
   });
 
   it('fixture scripts are time-ordered', () => {
-    for (const script of [greetingTurnScript, replyTurnScript, errorTurnScript]) {
+    for (const script of [
+      greetingTurnScript,
+      replyTurnScript,
+      errorTurnScript,
+      exerciseTurnScript,
+      exerciseFailTurnScript,
+      exercisePassTurnScript,
+      quizTurnScript,
+      quizGradedTurnScript,
+      artifactTurnScript,
+    ]) {
       for (let i = 1; i < script.length; i++) {
         expect(script[i]?.at ?? 0).toBeGreaterThanOrEqual(script[i - 1]?.at ?? 0);
       }
@@ -146,7 +174,7 @@ describe('turnStreamReducer', () => {
   it('turn.error surfaces message + retryable and ends the turn', () => {
     const state = applyEvents(initialTurnStreamState, [
       { type: 'turn.started', threadId: 't1' },
-      { type: 'turn.error', message: 'lost connection', retryable: true },
+      { type: 'turn.error', threadId: 't1', message: 'lost connection', retryable: true },
     ]);
     expect(state.error).toEqual({ message: 'lost connection', retryable: true });
     expect(state.turnStatus).toBe('idle');
@@ -208,6 +236,227 @@ describe('turnStreamReducer', () => {
     });
   });
 
+  describe('workbench', () => {
+    const pushed = applyEvents(initialTurnStreamState, [
+      { type: 'workbench.exercise', exercise: EXERCISE_PAYLOAD },
+    ]);
+
+    it('workbench.exercise stores the payload, targets the tab, bumps pushSeq', () => {
+      expect(pushed.workbench.exercise.payload).toEqual(EXERCISE_PAYLOAD);
+      expect(pushed.workbench.exercise.phase).toBe('editing');
+      expect(pushed.workbench.pushedTab).toBe('exercise');
+      expect(pushed.workbench.pushSeq).toBe(1);
+    });
+
+    it('a re-push resets the grading lifecycle (fresh exercise)', () => {
+      let state = turnStreamReducer(pushed, { type: 'exercise-submitted' });
+      state = applyEvents(state, [
+        { type: 'exercise.graded', exerciseId: 'ex-016', verdict: 'failed', feedback: 'nope' },
+        { type: 'workbench.exercise', exercise: { ...EXERCISE_PAYLOAD, id: 'ex-017' } },
+      ]);
+      expect(state.workbench.exercise.payload?.id).toBe('ex-017');
+      expect(state.workbench.exercise.phase).toBe('editing');
+      expect(state.workbench.exercise.verdict).toBeNull();
+      expect(state.workbench.exercise.attempts).toBe(0);
+      expect(state.workbench.pushSeq).toBe(2);
+    });
+
+    it('submit → grading with attempt counted; graded → verdict lands', () => {
+      let state = turnStreamReducer(pushed, { type: 'exercise-submitted' });
+      expect(state.workbench.exercise.phase).toBe('grading');
+      expect(state.workbench.exercise.attempts).toBe(1);
+
+      state = applyEvents(state, [
+        {
+          type: 'exercise.graded',
+          exerciseId: 'ex-016',
+          verdict: 'failed',
+          feedback: '2 of 3 tests failed',
+        },
+      ]);
+      expect(state.workbench.exercise.phase).toBe('graded');
+      expect(state.workbench.exercise.verdict).toBe('failed');
+      expect(state.workbench.exercise.feedback).toBe('2 of 3 tests failed');
+    });
+
+    it('try again re-enables editing, keeps the attempt count', () => {
+      let state = turnStreamReducer(pushed, { type: 'exercise-submitted' });
+      state = applyEvents(state, [
+        { type: 'exercise.graded', exerciseId: 'ex-016', verdict: 'failed', feedback: 'nope' },
+      ]);
+      state = turnStreamReducer(state, { type: 'exercise-try-again' });
+      expect(state.workbench.exercise.phase).toBe('editing');
+      expect(state.workbench.exercise.verdict).toBeNull();
+      expect(state.workbench.exercise.attempts).toBe(1);
+
+      state = turnStreamReducer(state, { type: 'exercise-submitted' });
+      state = applyEvents(state, [
+        { type: 'exercise.graded', exerciseId: 'ex-016', verdict: 'passed', feedback: 'all pass' },
+      ]);
+      expect(state.workbench.exercise.verdict).toBe('passed');
+      expect(state.workbench.exercise.attempts).toBe(2);
+    });
+
+    it('a graded event for a different exercise id is ignored', () => {
+      const state = applyEvents(turnStreamReducer(pushed, { type: 'exercise-submitted' }), [
+        { type: 'exercise.graded', exerciseId: 'ex-999', verdict: 'passed', feedback: 'stale' },
+      ]);
+      expect(state.workbench.exercise.phase).toBe('grading');
+      expect(state.workbench.exercise.verdict).toBeNull();
+    });
+
+    it('409 grading_in_progress keeps the grading state without an error', () => {
+      // First submit is grading; an impatient second submit 409s.
+      let state = turnStreamReducer(pushed, { type: 'exercise-submitted' });
+      state = turnStreamReducer(state, { type: 'exercise-submitted' });
+      state = turnStreamReducer(state, { type: 'exercise-grading-in-progress' });
+      expect(state.workbench.exercise.phase).toBe('grading');
+      expect(state.workbench.exercise.attempts).toBe(1);
+      expect(state.workbench.exercise.submitError).toBeNull();
+    });
+
+    it('history hydrates empty workbench slots from mirrored payloads without auto-opening', () => {
+      const hydration = {
+        exercise: hydratedExerciseState(EXERCISE_PAYLOAD, null),
+        quiz: QUIZ_PAYLOAD,
+      };
+      const state = turnStreamReducer(initialTurnStreamState, {
+        type: 'history',
+        items: [],
+        hydration,
+      });
+      expect(state.workbench.exercise.payload).toEqual(EXERCISE_PAYLOAD);
+      expect(state.workbench.exercise.phase).toBe('editing');
+      expect(state.workbench.quiz.payload).toEqual(QUIZ_PAYLOAD);
+      expect(state.workbench.pushSeq).toBe(0);
+      expect(state.workbench.pushedTab).toBeNull();
+    });
+
+    it('history restores a graded exercise with its verdict (reload mid-lesson)', () => {
+      const dto = exerciseDtoFor(EXERCISE_PAYLOAD, 'failed', [
+        gradedAttempt('a1', 'failed', 'Off by one on the empty case.'),
+      ]);
+      const state = turnStreamReducer(initialTurnStreamState, {
+        type: 'history',
+        items: [],
+        hydration: { exercise: hydratedExerciseState(EXERCISE_PAYLOAD, dto) },
+      });
+      expect(state.workbench.exercise.phase).toBe('graded');
+      expect(state.workbench.exercise.verdict).toBe('failed');
+      expect(state.workbench.exercise.feedback).toBe('Off by one on the empty case.');
+      expect(state.workbench.exercise.attempts).toBe(1);
+      // "Try again" still hands the editor back after a restored fail.
+      const retried = turnStreamReducer(state, { type: 'exercise-try-again' });
+      expect(retried.workbench.exercise.phase).toBe('editing');
+      expect(retried.workbench.exercise.attempts).toBe(1);
+    });
+
+    it('hydration never clobbers a live-pushed payload', () => {
+      const live = applyEvents(initialTurnStreamState, [
+        { type: 'workbench.exercise', exercise: { ...EXERCISE_PAYLOAD, id: 'ex-live' } },
+      ]);
+      const state = turnStreamReducer(live, {
+        type: 'history',
+        items: [],
+        hydration: { exercise: hydratedExerciseState(EXERCISE_PAYLOAD, null) },
+      });
+      expect(state.workbench.exercise.payload?.id).toBe('ex-live');
+    });
+
+    it('submit failure rolls back the attempt and surfaces the error', () => {
+      let state = turnStreamReducer(pushed, { type: 'exercise-submitted' });
+      state = turnStreamReducer(state, {
+        type: 'exercise-submit-failed',
+        message: 'server unreachable',
+      });
+      expect(state.workbench.exercise.phase).toBe('editing');
+      expect(state.workbench.exercise.attempts).toBe(0);
+      expect(state.workbench.exercise.submitError).toBe('server unreachable');
+    });
+
+    it('turn.error mid-grading hands the editor back instead of stranding "Grading…"', () => {
+      let state = turnStreamReducer(pushed, { type: 'exercise-submitted' });
+      state = applyEvents(state, [
+        { type: 'turn.error', threadId: 't1', message: 'the grader crashed', retryable: true },
+      ]);
+      expect(state.workbench.exercise.phase).toBe('editing');
+      expect(state.workbench.exercise.submitError).toBe('the grader crashed');
+    });
+
+    it('quiz push → submit → graded matches only its own quiz id', () => {
+      let state = applyEvents(initialTurnStreamState, [
+        { type: 'workbench.quiz', quiz: QUIZ_PAYLOAD },
+      ]);
+      expect(state.workbench.pushedTab).toBe('quiz');
+      expect(state.workbench.quiz.phase).toBe('answering');
+
+      state = turnStreamReducer(state, { type: 'quiz-submitted' });
+      expect(state.workbench.quiz.phase).toBe('grading');
+
+      const results = [{ question_id: 'q3', verdict: 'partial' as const, feedback_md: 'close' }];
+      state = applyEvents(state, [{ type: 'quiz.graded', quizId: 'other-quiz', results }]);
+      expect(state.workbench.quiz.phase).toBe('grading');
+
+      state = applyEvents(state, [{ type: 'quiz.graded', quizId: 'quiz-007', results }]);
+      expect(state.workbench.quiz.phase).toBe('graded');
+      expect(state.workbench.quiz.results).toEqual(results);
+    });
+
+    it('workbench.artifact stores the payload and targets the artifact tab', () => {
+      const state = applyEvents(initialTurnStreamState, [
+        { type: 'workbench.artifact', artifact: ARTIFACT_PAYLOAD },
+      ]);
+      expect(state.workbench.artifact).toEqual(ARTIFACT_PAYLOAD);
+      expect(state.workbench.pushedTab).toBe('artifact');
+    });
+
+    it('assessment.recorded replaces the strip payload and bumps its seq', () => {
+      const deltas = [
+        { topic: 'sql', concept: 'left-join', from: 0.55, to: 0.68, evidence: 'ex-016 passed' },
+      ];
+      let state = applyEvents(initialTurnStreamState, [
+        { type: 'assessment.recorded', concept_deltas: deltas },
+      ]);
+      expect(state.workbench.assessment?.concept_deltas).toEqual(deltas);
+      expect(state.workbench.assessmentSeq).toBe(1);
+      state = applyEvents(state, [
+        { type: 'assessment.recorded', concept_deltas: deltas, misconceptions_resolved: ['x'] },
+      ]);
+      expect(state.workbench.assessmentSeq).toBe(2);
+      expect(state.workbench.assessment?.misconceptions_resolved).toEqual(['x']);
+    });
+
+    it('the scripted exercise loop lands the documented end state', () => {
+      // push → submit → fail → try again → submit → pass + assessment
+      let state = applyEvents(
+        initialTurnStreamState,
+        exerciseTurnScript.map((s) => s.event),
+      );
+      state = turnStreamReducer(state, { type: 'exercise-submitted' });
+      state = applyEvents(
+        state,
+        exerciseFailTurnScript.map((s) => s.event),
+      );
+      expect(state.workbench.exercise.verdict).toBe('failed');
+
+      state = turnStreamReducer(state, { type: 'exercise-try-again' });
+      state = turnStreamReducer(state, { type: 'exercise-submitted' });
+      state = applyEvents(
+        state,
+        exercisePassTurnScript.map((s) => s.event),
+      );
+      expect(state.workbench.exercise.verdict).toBe('passed');
+      expect(state.workbench.exercise.attempts).toBe(2);
+      expect(state.workbench.assessment?.concept_deltas).toHaveLength(2);
+      expect(state.turnStatus).toBe('idle');
+    });
+
+    it('reset clears workbench state', () => {
+      const state = turnStreamReducer(pushed, { type: 'reset' });
+      expect(state.workbench).toEqual(initialTurnStreamState.workbench);
+    });
+  });
+
   it('replaying the whole greeting fixture lands the expected final state', () => {
     const state = applyEvents(
       initialTurnStreamState,
@@ -246,6 +495,124 @@ describe('parseWsFrame', () => {
   });
 });
 
+function gradedAttempt(
+  id: string,
+  verdict: 'passed' | 'failed' | 'error' | null,
+  feedback: string | null = null,
+): NonNullable<ExerciseDto['attempts']>[number] {
+  return {
+    id,
+    code: 'def solve(): ...',
+    verdict,
+    feedback,
+    createdAt: '2026-07-17T12:00:00Z',
+    gradedAt: verdict === null ? null : '2026-07-17T12:01:00Z',
+  };
+}
+
+function exerciseDtoFor(
+  payload: typeof EXERCISE_PAYLOAD,
+  status: ExerciseDto['status'],
+  attempts: NonNullable<ExerciseDto['attempts']>,
+): ExerciseDto {
+  return {
+    id: payload.id,
+    threadId: 't1',
+    language: payload.language,
+    title: payload.title,
+    prompt: payload.prompt_md,
+    starterCode: payload.starter_code,
+    concepts: payload.concepts,
+    difficulty: payload.difficulty,
+    status,
+    createdAt: '2026-07-17T11:59:00Z',
+    attempts,
+  };
+}
+
+describe('hydratedExerciseState', () => {
+  it('no DTO (or a mismatched id) → pristine editing state', () => {
+    const pristine = hydratedExerciseState(EXERCISE_PAYLOAD, null);
+    expect(pristine.phase).toBe('editing');
+    expect(pristine.attempts).toBe(0);
+    const mismatched = hydratedExerciseState(
+      EXERCISE_PAYLOAD,
+      exerciseDtoFor({ ...EXERCISE_PAYLOAD, id: 'ex-other' }, 'passed', [
+        gradedAttempt('a1', 'passed'),
+      ]),
+    );
+    expect(mismatched.phase).toBe('editing');
+    expect(mismatched.attempts).toBe(0);
+  });
+
+  it('an ungraded attempt → still grading (verdict arrives over the reconnected socket)', () => {
+    const state = hydratedExerciseState(
+      EXERCISE_PAYLOAD,
+      exerciseDtoFor(EXERCISE_PAYLOAD, 'open', [
+        gradedAttempt('a1', 'failed', 'nope'),
+        gradedAttempt('a2', null),
+      ]),
+    );
+    expect(state.phase).toBe('grading');
+    expect(state.attempts).toBe(2);
+    expect(state.verdict).toBeNull();
+  });
+
+  it('graded exercise → verdict + feedback of the LATEST graded attempt', () => {
+    const state = hydratedExerciseState(
+      EXERCISE_PAYLOAD,
+      exerciseDtoFor(EXERCISE_PAYLOAD, 'passed', [
+        gradedAttempt('a1', 'failed', 'first try feedback'),
+        gradedAttempt('a2', 'passed', 'clean solve'),
+      ]),
+    );
+    expect(state.phase).toBe('graded');
+    expect(state.verdict).toBe('passed');
+    expect(state.feedback).toBe('clean solve');
+    expect(state.attempts).toBe(2);
+  });
+
+  it('errored attempts alone (grading turn died) → editing with the attempt count', () => {
+    const state = hydratedExerciseState(
+      EXERCISE_PAYLOAD,
+      exerciseDtoFor(EXERCISE_PAYLOAD, 'open', [gradedAttempt('a1', 'error')]),
+    );
+    expect(state.phase).toBe('editing');
+    expect(state.verdict).toBeNull();
+    expect(state.attempts).toBe(1);
+  });
+});
+
+describe('deriveWorkbenchHydration', () => {
+  const base: Omit<ThreadItem, 'kind' | 'payload' | 'id'> = {
+    codexItemId: null,
+    role: 'agent',
+    createdAt: '2026-07-17T12:00:00Z',
+  };
+
+  it('takes the LAST valid exercise_ref/quiz payloads; artifacts are never mirrored', () => {
+    const items: ThreadItem[] = [
+      { ...base, id: 'i1', kind: 'exercise_ref', payload: { ...EXERCISE_PAYLOAD, id: 'ex-old' } },
+      { ...base, id: 'i2', kind: 'message', payload: { text: 'chat' } },
+      { ...base, id: 'i3', kind: 'quiz', payload: QUIZ_PAYLOAD },
+      { ...base, id: 'i4', kind: 'exercise_ref', payload: EXERCISE_PAYLOAD },
+    ];
+    const hydration = deriveWorkbenchHydration(items);
+    expect(hydration.exercise?.id).toBe(EXERCISE_PAYLOAD.id);
+    expect(hydration.quiz?.id).toBe(QUIZ_PAYLOAD.id);
+  });
+
+  it('skips malformed payloads with a warning and returns empty when nothing matches', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const items: ThreadItem[] = [
+      { ...base, id: 'i1', kind: 'exercise_ref', payload: { nope: true } },
+      { ...base, id: 'i2', kind: 'message', payload: { text: 'chat' } },
+    ];
+    expect(deriveWorkbenchHydration(items)).toEqual({});
+    expect(console.warn).toHaveBeenCalled();
+  });
+});
+
 describe('threadItemToChatMessage', () => {
   const base: Omit<ThreadItem, 'kind' | 'payload'> = {
     id: 'i1',
@@ -257,6 +624,56 @@ describe('threadItemToChatMessage', () => {
   it('maps message items with {text} payloads', () => {
     const item: ThreadItem = { ...base, kind: 'message', payload: { text: 'hello' } };
     expect(threadItemToChatMessage(item)).toEqual({ id: 'i1', role: 'agent', text: 'hello' });
+  });
+
+  it('system rows prefer the caption over the raw grading instructions', () => {
+    const item: ThreadItem = {
+      ...base,
+      role: 'system',
+      kind: 'message',
+      payload: {
+        text: 'The learner submitted ex-001…\n1. Run the hidden tests…',
+        caption: 'Attempt 1 on ex-001 submitted.',
+      },
+    };
+    expect(threadItemToChatMessage(item)).toEqual({
+      id: 'i1',
+      role: 'system',
+      text: 'Attempt 1 on ex-001 submitted.',
+    });
+    // Agent rows never swap in a caption; the greeting token passes through
+    // (message-bubble maps it to "Session started").
+    expect(
+      threadItemToChatMessage({ ...base, kind: 'message', payload: { text: 'hi', caption: 'x' } }),
+    ).toEqual({ id: 'i1', role: 'agent', text: 'hi' });
+    expect(
+      threadItemToChatMessage({
+        ...base,
+        role: 'system',
+        kind: 'message',
+        payload: { text: '[session-start]' },
+      }),
+    ).toEqual({ id: 'i1', role: 'system', text: '[session-start]' });
+  });
+
+  it('caption-less system rows NEVER render their raw text (QA finding F1 — pre-caption rows)', () => {
+    // Rows written by a pre-caption server carry only the full internal
+    // grading instructions; the render-time guard swaps in a generic line so
+    // the leak is impossible regardless of what the server wrote.
+    const legacy = threadItemToChatMessage({
+      ...base,
+      role: 'system',
+      kind: 'message',
+      payload: {
+        text: 'The learner submitted their solution for exercise ex-001…\n1. Run the hidden tests in `.exercises/ex-001/tests/`…\n2. Call ui_grade_exercise…',
+      },
+    });
+    expect(legacy).toEqual({
+      id: 'i1',
+      role: 'system',
+      text: 'The tutor ran a task in the background.',
+    });
+    expect(legacy!.text).not.toContain('ui_grade_exercise');
   });
 
   it('skips non-message kinds and malformed payloads', () => {

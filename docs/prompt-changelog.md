@@ -4,6 +4,26 @@ Prompts are code (plans/03 §6.4): every material change to a skill, mode
 template, or the context envelope gets an entry here, and the golden-path E2E
 must be re-run before merging prompt changes.
 
+## 2026-07-17 — Phase 2A: tool descriptions + grading-turn templates
+
+- Added `uiToolDescriptions` (packages/shared/src/mcp-tools.ts) — the
+  model-facing MCP tool descriptions. Written as guardrails: they restate the
+  teach-skill preconditions (hidden tests BEFORE ui_push_exercise, run tests
+  before ui_grade_exercise, file-first for ui_record_assessment).
+- New server-initiated turn templates (system role, never rendered as the
+  learner): `buildExerciseGradingTurn` (api/exercises.ts — run hidden tests in
+  the sandbox, never infer verdicts, ui_grade_exercise then memory-skill
+  commit + ui_record_assessment mirror; submission inlined ≤8KB) and
+  `buildQuizGradingTurn` (api/quiz.ts — answers + instant-checked verdicts as
+  evidence, ui_grade_quiz for short answers, brief chat recap, commit+mirror).
+- UiToolRelay result/error strings (relay/index.ts) are themselves prompt
+  surface: success strings restate the next guardrail ("wait for the
+  submission; do not reveal the hidden tests or the solution"), errors are
+  written for in-turn self-correction ("re-read the session_token from your
+  instructions", "write meaningful tests … THEN call ui_push_exercise again").
+- No teach/memory skill edits were needed: Phase 2 E2E runs showed compliance
+  with the existing exercise/grading directives.
+
 ## 2026-07-17 — Phase 1 QA fixes (findings M1/M2/M3, p9c)
 
 - **Root cause first (not a prompt):** the teach/memory skills at

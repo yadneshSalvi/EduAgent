@@ -1,8 +1,8 @@
 /**
  * Agent host entrypoint. Boot order per plans/03 §1:
- *   config → Prisma → WorkspaceManager (+skills) → AppServerClient (spawn
- *   codex) → MemoryPipeline → ThreadManager → routes + WS gateway.
- * (UiToolRelay joins the graph in Phase 2.)
+ *   config → Prisma → WorkspaceManager (+skills) → UiToolRelay →
+ *   AppServerClient (spawn codex with the eduagent-ui MCP registration) →
+ *   MemoryPipeline → ThreadManager → routes + WS gateway.
  */
 import { buildApp } from './app.js';
 import { createServices } from './boot.js';

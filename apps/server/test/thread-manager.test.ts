@@ -454,6 +454,167 @@ describe('startTurn', () => {
   });
 });
 
+describe('per-workspace turn queue (Phase 2 carry-over b)', () => {
+  async function insertThreadRow(codexThreadId: string, userId = USER_ID): Promise<Thread> {
+    return prisma.thread.create({
+      data: {
+        userId,
+        codexThreadId,
+        mode: 'learn',
+        topicSlug: null,
+        title: 'test',
+        sessionToken: `tok-${codexThreadId}`,
+      },
+    });
+  }
+
+  it('serializes turns across DIFFERENT threads of the same user', async () => {
+    const turnStarts: WireMessage[] = [];
+    let releaseFirst: (() => void) | null = null;
+    fake.onMethod('turn/start', (msg) => {
+      turnStarts.push(msg);
+      const { threadId } = msg.params as { threadId: string };
+      const turnId = `turn-ws-${turnStarts.length}`;
+      fake.respond(msg.id as number, { turn: { id: turnId, status: 'inProgress' } });
+      const complete = () =>
+        fake.notifyClient('turn/completed', {
+          threadId,
+          turn: { id: turnId, status: 'completed', error: null },
+        });
+      if (turnStarts.length === 1) releaseFirst = complete;
+      else complete();
+    });
+
+    // Two threads, one workspace: a chat turn and a grading turn overlapping
+    // would double-emit commits from overlapping sinceSha ranges.
+    const chat = await insertThreadRow('cdx-ws-chat');
+    const grading = await insertThreadRow('cdx-ws-grading');
+    const first = manager.startTurn(chat, 'chat turn');
+    const second = manager.startSystemTurn(grading, 'grading turn');
+    await fake.waitFor((m) => m.method === 'turn/start');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(turnStarts.length).toBe(1);
+    releaseFirst!();
+    await Promise.all([first, second]);
+    expect(turnStarts.length).toBe(2);
+    // Order preserved: the grading turn went to the grading thread second.
+    expect((turnStarts[1]!.params as { threadId: string }).threadId).toBe('cdx-ws-grading');
+  });
+
+  it('mirrors system turns with role system (never rendered as the learner)', async () => {
+    scriptCannedTurns(fake, counters);
+    const thread = await insertThreadRow('cdx-system-role');
+    await manager.startSystemTurn(thread, 'The learner submitted ex-001…');
+    const rows = await prisma.itemMirror.findMany({
+      where: { threadId: thread.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(rows[0]).toMatchObject({ role: 'system', kind: 'message' });
+    expect(rows[0]!.payload).toEqual({ text: 'The learner submitted ex-001…' });
+  });
+
+  it('mirrors a system-turn caption so reloads never show the raw instructions', async () => {
+    scriptCannedTurns(fake, counters);
+    const thread = await insertThreadRow('cdx-system-caption');
+    await manager.startSystemTurn(thread, 'The learner submitted ex-002…', {
+      caption: 'Attempt 1 on ex-002 submitted.',
+    });
+    const rows = await prisma.itemMirror.findMany({
+      where: { threadId: thread.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(rows[0]!.payload).toEqual({
+      text: 'The learner submitted ex-002…',
+      caption: 'Attempt 1 on ex-002 submitted.',
+    });
+  });
+});
+
+describe('turn waiter keyed by turn id (Phase 2 carry-over c)', () => {
+  it('a late completion after the fail-safe fired must not settle the next queued turn', async () => {
+    // Dedicated manager with a small fail-safe ceiling — big enough that
+    // turn 2's own ceiling can't fire inside this test's assertion window.
+    const shortManager = new ThreadManager({
+      prisma,
+      client,
+      workspaces,
+      memory,
+      sink,
+      turnTimeoutMs: 800,
+    });
+    try {
+      const turnStarts: WireMessage[] = [];
+      let completeLate: (() => void) | null = null;
+      fake.onMethod('turn/start', (msg) => {
+        turnStarts.push(msg);
+        const { threadId } = msg.params as { threadId: string };
+        const turnId = `turn-late-${turnStarts.length}`;
+        fake.respond(msg.id as number, { turn: { id: turnId, status: 'inProgress' } });
+        if (turnStarts.length === 1) {
+          // Turn 1 hangs past the fail-safe; its completion arrives LATE.
+          completeLate = () =>
+            fake.notifyClient('turn/completed', {
+              threadId,
+              turn: { id: turnId, status: 'completed', error: null },
+            });
+        }
+        // Turn 2 stays open until its own completion below.
+      });
+
+      const thread = await prisma.thread.create({
+        data: {
+          userId: USER_ID,
+          codexThreadId: 'cdx-late',
+          mode: 'learn',
+          topicSlug: null,
+          title: 'test',
+          sessionToken: 'tok-cdx-late',
+        },
+      });
+      const first = shortManager.startTurn(thread, 'hangs past the fail-safe');
+      const second = shortManager.startTurn(thread, 'queued behind it');
+      await first; // settles via the 800ms fail-safe → turn.error
+
+      // Wait for turn 2's turn/start, then deliver turn ONE's late completion.
+      const deadline = Date.now() + 5_000;
+      while (turnStarts.length < 2) {
+        if (Date.now() > deadline) throw new Error('turn 2 never started');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      completeLate!();
+
+      // The pre-fix bug: turn-late-1's completion settled turn 2's waiter.
+      let secondSettled = false;
+      void second.then(() => {
+        secondSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(secondSettled).toBe(false);
+
+      // Turn 2 settles only by its OWN completion.
+      fake.notifyClient('turn/completed', {
+        threadId: 'cdx-late',
+        turn: { id: 'turn-late-2', status: 'completed', error: null },
+      });
+      await second;
+
+      const errors = sink.records.filter(
+        (r) => r.target === 'thread' && r.event.type === 'turn.error',
+      );
+      const completions = sink.records.filter(
+        (r) => r.target === 'thread' && r.event.type === 'turn.completed',
+      );
+      expect(errors.length).toBe(1); // the fail-safe abort of turn 1
+      expect((errors[0]!.event as Extract<WsEvent, { type: 'turn.error' }>).threadId).toBe(
+        thread.id,
+      );
+      expect(completions.length).toBe(1); // turn 2 only
+    } finally {
+      shortManager.close();
+    }
+  });
+});
+
 describe('resumeAll', () => {
   it('re-resumes touched threads against the new child after a restart', async () => {
     scriptCannedTurns(fake, counters);

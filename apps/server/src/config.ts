@@ -21,7 +21,9 @@ const envSchema = z.object({
   AUTH_MODE: z.enum(['clerk', 'local']).default('clerk'),
   WEB_PORT: z.coerce.number().int().positive().default(3000),
   SERVER_PORT: z.coerce.number().int().positive().default(8787),
-  RELAY_PORT: z.coerce.number().int().positive().default(8788),
+  // 0 = bind an ephemeral port (tests); boot passes the ACTUAL bound port to
+  // the MCP registration, so nothing else may read this after listen().
+  RELAY_PORT: z.coerce.number().int().min(0).default(8788),
   SERVER_HOST: z.string().optional(),
   DATA_DIR: z.string().default('./data'),
   DATABASE_URL: z.string().optional(),

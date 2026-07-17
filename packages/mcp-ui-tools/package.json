@@ -2,11 +2,20 @@
   "name": "@eduagent/mcp-ui-tools",
   "version": "0.0.0",
   "private": true,
-  "description": "MCP stdio server exposing UI tools to the Codex agent — placeholder until Phase 2 (tool arg schemas already live in @eduagent/shared)",
+  "description": "MCP stdio server exposing the ui_* tools to the Codex agent. Tool definitions are generated from the zod schemas in @eduagent/shared; every call is forwarded to the UiToolRelay over localhost HTTP — zero business logic here.",
+  "type": "module",
   "scripts": {
-    "build": "echo '[@eduagent/mcp-ui-tools] placeholder: nothing to build yet'",
-    "typecheck": "echo '[@eduagent/mcp-ui-tools] placeholder: nothing to typecheck yet'",
-    "lint": "echo '[@eduagent/mcp-ui-tools] placeholder: nothing to lint yet'",
-    "test": "echo '[@eduagent/mcp-ui-tools] placeholder: no tests yet'"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@eduagent/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }

@@ -3,19 +3,27 @@ import {
   apiErrorSchema,
   createThreadRequestSchema,
   createThreadResponseSchema,
+  exerciseDtoSchema,
   listThreadsResponseSchema,
   localLoginRequestSchema,
   localUsersResponseSchema,
   meResponseSchema,
   okResponseSchema,
+  submitExerciseRequestSchema,
+  submitExerciseResponseSchema,
+  submitQuizRequestSchema,
   threadItemsResponseSchema,
   type CreateThreadRequest,
   type CreateThreadResponse,
+  type ExerciseDto,
   type ListThreadsResponse,
   type LocalLoginRequest,
   type LocalUsersResponse,
   type MeResponse,
   type OkResponse,
+  type SubmitExerciseRequest,
+  type SubmitExerciseResponse,
+  type SubmitQuizRequest,
   type ThreadItemsResponse,
   type ThreadMode,
 } from '@eduagent/shared';
@@ -209,6 +217,39 @@ export function getThreadItems(
 export function interruptThread(threadId: string): Promise<OkResponse> {
   return apiFetch(`/api/threads/${encodeURIComponent(threadId)}/interrupt`, {
     method: 'POST',
+    schema: okResponseSchema,
+  });
+}
+
+export function getExercise(exerciseId: string, signal?: AbortSignal): Promise<ExerciseDto> {
+  return apiFetch(`/api/exercises/${encodeURIComponent(exerciseId)}`, {
+    schema: exerciseDtoSchema,
+    signal,
+  });
+}
+
+/** Triggers the grading turn; the verdict arrives via WS `exercise.graded`. */
+export function submitExercise(
+  exerciseId: string,
+  request: SubmitExerciseRequest,
+): Promise<SubmitExerciseResponse> {
+  return apiFetch(`/api/exercises/${encodeURIComponent(exerciseId)}/submit`, {
+    method: 'POST',
+    body: submitExerciseRequestSchema.parse(request),
+    schema: submitExerciseResponseSchema,
+  });
+}
+
+/**
+ * All answers ship at once (client-checked verdicts included — mastery
+ * evidence); short-answer verdicts come back via WS `quiz.graded`. The shared
+ * contract defines no dedicated response schema, so the generic ok envelope
+ * applies.
+ */
+export function submitQuiz(quizId: string, request: SubmitQuizRequest): Promise<OkResponse> {
+  return apiFetch(`/api/quiz/${encodeURIComponent(quizId)}/submit`, {
+    method: 'POST',
+    body: submitQuizRequestSchema.parse(request),
     schema: okResponseSchema,
   });
 }

@@ -50,6 +50,9 @@ class FakeThreadService implements ThreadService {
   startTurn(): Promise<void> {
     return Promise.resolve();
   }
+  startSystemTurn(): Promise<void> {
+    return Promise.resolve();
+  }
   interrupt(threadId: string): Promise<void> {
     this.interrupted.push(threadId);
     return Promise.resolve();

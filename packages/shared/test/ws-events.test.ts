@@ -70,9 +70,24 @@ describe('wsEventSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects turn.error without a retryable flag', () => {
-    const result = wsEventSchema.safeParse({ type: 'turn.error', message: 'boom' });
-    expect(result.success).toBe(false);
+  it('parses turn.error with threadId (Phase 2 carry-over d)', () => {
+    const event = wsEventSchema.parse({
+      type: 'turn.error',
+      threadId: 'thread-1',
+      message: 'boom',
+      retryable: true,
+    });
+    expect(event.type).toBe('turn.error');
+    if (event.type === 'turn.error') expect(event.threadId).toBe('thread-1');
+  });
+
+  it('rejects turn.error without a retryable flag or threadId', () => {
+    expect(
+      wsEventSchema.safeParse({ type: 'turn.error', threadId: 't', message: 'boom' }).success,
+    ).toBe(false);
+    expect(
+      wsEventSchema.safeParse({ type: 'turn.error', message: 'boom', retryable: true }).success,
+    ).toBe(false);
   });
 
   it('rejects unknown event types', () => {

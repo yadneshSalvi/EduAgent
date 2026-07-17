@@ -2,25 +2,32 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { PanelRight, Square } from 'lucide-react';
+import { Square } from 'lucide-react';
+import type { SubmitQuizRequest } from '@eduagent/shared';
 import type { TurnStream } from '@/hooks/use-turn-stream';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ErrorState } from '@/components/shared/error-state';
+import { WorkbenchPanel } from '@/components/workbench/workbench-panel';
 import { ChatInput } from './chat-input';
 import { MessageList } from './message-list';
 import { cn } from '@/lib/utils';
 
 /**
- * Presentational tutor room (plans/04 §3), minus the workbench pane (Phase 2
- * — a collapsed right-rail stub holds its place). Driven either by the live
- * useTurnStream hook or the dev-harness replay driver — same reducer, same UI.
+ * Presentational tutor room (plans/04 §3): chat (55%) + workbench (45%,
+ * stacked under the chat < md). Driven either by the live useTurnStream hook
+ * or the dev-harness replay driver — same reducer, same UI. Submission
+ * transports are injected the same way (REST vs scripted replay).
  */
 interface TutorRoomViewProps {
   title: string;
   topicSlug: string | null;
+  /** Keys the per-thread workbench collapsed-state persistence. */
+  threadId: string;
   stream: TurnStream;
   onInterrupt: () => void;
+  onSubmitExercise: (exerciseId: string, code: string) => Promise<unknown>;
+  onSubmitQuiz: (quizId: string, answers: SubmitQuizRequest['answers']) => Promise<unknown>;
   /** Extra topbar content (dev-harness controls). */
   topbarExtra?: ReactNode;
   emptyHint?: string;
@@ -59,13 +66,17 @@ function ConnectionDot({ connection }: { connection: TurnStream['state']['connec
 export function TutorRoomView({
   title,
   topicSlug,
+  threadId,
   stream,
   onInterrupt,
+  onSubmitExercise,
+  onSubmitQuiz,
   topbarExtra,
   emptyHint,
 }: TutorRoomViewProps) {
-  const { state, send, refetchHistory } = stream;
+  const { state, send, refetchHistory, dispatch } = stream;
   const turnInFlight = state.turnStatus !== 'idle';
+  const connectionLost = state.connection === 'not-found' || state.connection === 'failed';
 
   const retryTurn = () => {
     const lastUser = [...state.items].reverse().find((item) => item.role === 'user');
@@ -97,8 +108,8 @@ export function TutorRoomView({
         </Button>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {state.connection === 'not-found' ? (
             <div className="flex flex-1 items-center justify-center p-8">
               <ErrorState
@@ -141,20 +152,15 @@ export function TutorRoomView({
           )}
         </div>
 
-        {/* Workbench (Exercise · Quiz · Artifact) lands in Phase 2 — collapsed rail stub. */}
-        <aside
-          className="hidden w-11 shrink-0 flex-col items-center gap-3 border-l bg-surface py-4 xl:flex"
-          aria-label="Workbench (coming in Phase 2)"
-          title="Workbench — Exercise · Quiz · Artifact (Phase 2)"
-        >
-          <PanelRight className="size-4 text-muted-foreground/70" aria-hidden />
-          <span
-            className="font-mono text-caption tracking-wide text-muted-foreground/70"
-            style={{ writingMode: 'vertical-rl' }}
-          >
-            workbench
-          </span>
-        </aside>
+        {connectionLost ? null : (
+          <WorkbenchPanel
+            threadId={threadId}
+            workbench={state.workbench}
+            dispatch={dispatch}
+            onSubmitExercise={onSubmitExercise}
+            onSubmitQuiz={onSubmitQuiz}
+          />
+        )}
       </div>
     </div>
   );

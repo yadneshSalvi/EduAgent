@@ -8,8 +8,10 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import type { PrismaClient } from '@prisma/client';
 import { authRoutes } from './api/auth.js';
+import { exerciseRoutes } from './api/exercises.js';
 import type { WsGateway } from './api/gateway.js';
 import { healthRoutes } from './api/health.js';
+import { quizRoutes } from './api/quiz.js';
 import { threadRoutes } from './api/threads.js';
 import { wsRoutes } from './api/ws.js';
 import { createAuthProvider, type AuthedUser } from './auth/index.js';
@@ -40,6 +42,8 @@ export interface AppServiceSet {
   codexHealth?: () => Promise<HealthProbe>;
   /** When present, closed on app.close() (terminates the codex child). */
   client?: { close(): Promise<void> };
+  /** When present, closed on app.close() (stops the UiToolRelay listener). */
+  relay?: { close(): Promise<void> };
 }
 
 export interface BuildAppDeps {
@@ -77,9 +81,11 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
     if (resolved.gateway) app.decorate('wsGateway', resolved.gateway);
     if (resolved.codexHealth) app.decorate('codexHealth', resolved.codexHealth);
     const client = resolved.client;
-    if (client) {
+    const relay = resolved.relay;
+    if (client || relay) {
       app.addHook('onClose', async () => {
-        await client.close();
+        await client?.close();
+        await relay?.close();
       });
     }
   }
@@ -87,6 +93,8 @@ export async function buildApp({ config, prisma, services }: BuildAppDeps): Prom
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(threadRoutes);
+  await app.register(exerciseRoutes);
+  await app.register(quizRoutes);
   await app.register(wsRoutes);
 
   return app;

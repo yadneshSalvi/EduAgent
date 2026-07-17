@@ -3,13 +3,22 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { z } from 'zod';
 import {
+  exercisePayloadSchema,
+  quizPayloadSchema,
   wsEventSchema,
+  type ArtifactPayload,
+  type AssessmentPayload,
   type ClientWsEvent,
+  type ExerciseDto,
+  type ExercisePayload,
+  type ExerciseVerdict,
   type MemoryCommit,
+  type QuizGradeResult,
+  type QuizPayload,
   type ThreadItem,
   type WsEvent,
 } from '@eduagent/shared';
-import { ApiError, getThreadItems, threadSocketUrl } from '@/lib/api';
+import { ApiError, getExercise, getThreadItems, threadSocketUrl } from '@/lib/api';
 
 /**
  * Turn state per thread (plans/04 §2): one hook owns the WS connection to
@@ -34,6 +43,65 @@ export interface ActivityChip {
 }
 
 export type TurnStatus = 'idle' | 'awaiting' | 'streaming';
+
+export type WorkbenchTab = 'exercise' | 'quiz' | 'artifact';
+
+export interface WorkbenchExerciseState {
+  payload: ExercisePayload | null;
+  /** editing → grading (submit in flight / grading turn running) → graded. */
+  phase: 'editing' | 'grading' | 'graded';
+  verdict: ExerciseVerdict | null;
+  feedback: string;
+  /** Submissions accepted so far (optimistic; rolled back on submit failure). */
+  attempts: number;
+  /** The POST itself failed — grading never started. */
+  submitError: string | null;
+}
+
+export interface WorkbenchQuizState {
+  payload: QuizPayload | null;
+  phase: 'answering' | 'grading' | 'graded';
+  results: QuizGradeResult[] | null;
+  submitError: string | null;
+}
+
+export interface WorkbenchState {
+  exercise: WorkbenchExerciseState;
+  quiz: WorkbenchQuizState;
+  artifact: ArtifactPayload | null;
+  /** Last workbench.* push; seq bumps each time so the panel can auto-open. */
+  pushedTab: WorkbenchTab | null;
+  pushSeq: number;
+  /** Latest assessment.recorded payload; seq re-triggers the ticker strip. */
+  assessment: AssessmentPayload | null;
+  assessmentSeq: number;
+}
+
+const initialExerciseState: WorkbenchExerciseState = {
+  payload: null,
+  phase: 'editing',
+  verdict: null,
+  feedback: '',
+  attempts: 0,
+  submitError: null,
+};
+
+const initialQuizState: WorkbenchQuizState = {
+  payload: null,
+  phase: 'answering',
+  results: null,
+  submitError: null,
+};
+
+export const initialWorkbenchState: WorkbenchState = {
+  exercise: initialExerciseState,
+  quiz: initialQuizState,
+  artifact: null,
+  pushedTab: null,
+  pushSeq: 0,
+  assessment: null,
+  assessmentSeq: 0,
+};
 export type ConnectionStatus =
   | 'connecting'
   | 'open'
@@ -57,6 +125,7 @@ export interface TurnStreamState {
   historyError: string | null;
   /** Commits seen on this thread socket (containers surface them as toasts). */
   commits: MemoryCommit[];
+  workbench: WorkbenchState;
   error: { message: string; retryable: boolean } | null;
 }
 
@@ -71,18 +140,38 @@ export const initialTurnStreamState: TurnStreamState = {
   history: 'loading',
   historyError: null,
   commits: [],
+  workbench: initialWorkbenchState,
   error: null,
 };
+
+/**
+ * Client-originated workbench transitions (submission lifecycle) — the only
+ * actions components dispatch directly, via TurnStream.dispatch. Everything
+ * else in workbench state is WS-event-derived.
+ */
+export type WorkbenchClientAction =
+  | { type: 'exercise-submitted' }
+  | { type: 'exercise-submit-failed'; message: string }
+  /**
+   * Submit hit 409 `grading_in_progress` (an earlier attempt is still being
+   * graded, `03` §3) — stay in the grading state, never an error.
+   */
+  | { type: 'exercise-grading-in-progress' }
+  /** Fail verdict → "Try again" re-enables the editor (attempts retained). */
+  | { type: 'exercise-try-again' }
+  | { type: 'quiz-submitted' }
+  | { type: 'quiz-submit-failed'; message: string };
 
 export type TurnStreamAction =
   | { type: 'event'; event: WsEvent }
   | { type: 'send'; item: ChatMessage }
-  | { type: 'history'; items: ChatMessage[] }
+  | { type: 'history'; items: ChatMessage[]; hydration?: WorkbenchHydration }
   | { type: 'history-loading' }
   | { type: 'history-error'; message: string }
   | { type: 'connection'; status: ConnectionStatus }
   /** Clear turn/chat state but keep the connection surface (dev-harness replay). */
-  | { type: 'reset' };
+  | { type: 'reset' }
+  | WorkbenchClientAction;
 
 /** Flush the in-flight streaming buffer into items (id-deduped). */
 function flushStreaming(state: TurnStreamState): TurnStreamState {
@@ -152,7 +241,98 @@ function applyActivity(
   return [...chips, chip];
 }
 
+/**
+ * Workbench slice of the WS stream (plans/04 §3). Pushes replace the tab's
+ * content and reset its grading lifecycle; graded events settle only the
+ * matching id (a stale grading turn must not flip a newer exercise/quiz).
+ */
+function applyWorkbenchEvent(workbench: WorkbenchState, event: WsEvent): WorkbenchState {
+  switch (event.type) {
+    case 'workbench.exercise':
+      return {
+        ...workbench,
+        exercise: { ...initialExerciseState, payload: event.exercise },
+        pushedTab: 'exercise',
+        pushSeq: workbench.pushSeq + 1,
+      };
+
+    case 'workbench.quiz':
+      return {
+        ...workbench,
+        quiz: { ...initialQuizState, payload: event.quiz },
+        pushedTab: 'quiz',
+        pushSeq: workbench.pushSeq + 1,
+      };
+
+    case 'workbench.artifact':
+      return {
+        ...workbench,
+        artifact: event.artifact,
+        pushedTab: 'artifact',
+        pushSeq: workbench.pushSeq + 1,
+      };
+
+    case 'exercise.graded': {
+      if (workbench.exercise.payload?.id !== event.exerciseId) return workbench;
+      return {
+        ...workbench,
+        exercise: {
+          ...workbench.exercise,
+          phase: 'graded',
+          verdict: event.verdict,
+          feedback: event.feedback,
+          submitError: null,
+        },
+      };
+    }
+
+    case 'quiz.graded': {
+      if (workbench.quiz.payload?.id !== event.quizId) return workbench;
+      return {
+        ...workbench,
+        quiz: { ...workbench.quiz, phase: 'graded', results: event.results, submitError: null },
+      };
+    }
+
+    case 'assessment.recorded':
+      return {
+        ...workbench,
+        assessment: {
+          concept_deltas: event.concept_deltas,
+          ...(event.misconceptions_opened
+            ? { misconceptions_opened: event.misconceptions_opened }
+            : {}),
+          ...(event.misconceptions_resolved
+            ? { misconceptions_resolved: event.misconceptions_resolved }
+            : {}),
+        },
+        assessmentSeq: workbench.assessmentSeq + 1,
+      };
+
+    case 'turn.error': {
+      // A grading turn that dies must not strand the workbench in "Grading…" —
+      // hand control back so the learner can submit again.
+      let next = workbench;
+      if (next.exercise.phase === 'grading') {
+        next = {
+          ...next,
+          exercise: { ...next.exercise, phase: 'editing', submitError: event.message },
+        };
+      }
+      if (next.quiz.phase === 'grading') {
+        next = { ...next, quiz: { ...next.quiz, phase: 'answering', submitError: event.message } };
+      }
+      return next;
+    }
+
+    default:
+      return workbench;
+  }
+}
+
 function applyEvent(state: TurnStreamState, event: WsEvent): TurnStreamState {
+  const workbench = applyWorkbenchEvent(state.workbench, event);
+  if (workbench !== state.workbench) state = { ...state, workbench };
   switch (event.type) {
     case 'turn.started':
       return {
@@ -218,8 +398,8 @@ function applyEvent(state: TurnStreamState, event: WsEvent): TurnStreamState {
         error: { message: event.message, retryable: event.retryable },
       };
 
-    // Workbench / grading / exam events are Phase 2 surfaces — parsed (so the
-    // contract is enforced) but not rendered by the tutor room yet.
+    // Workbench / grading / assessment events were folded in by
+    // applyWorkbenchEvent above; exam events are Phase 3/4 surfaces.
     case 'workbench.exercise':
     case 'workbench.quiz':
     case 'workbench.artifact':
@@ -246,13 +426,28 @@ export function turnStreamReducer(
         turnStatus: 'awaiting',
         error: null,
       };
-    case 'history':
+    case 'history': {
+      // Mirror-backed workbench hydration (task #15 contract): fills EMPTY
+      // slots only — live WS pushes always outrank the mirror — and never
+      // bumps pushSeq, so a reload restores content without auto-opening.
+      let workbench = state.workbench;
+      if (action.hydration?.exercise && !workbench.exercise.payload) {
+        workbench = { ...workbench, exercise: action.hydration.exercise };
+      }
+      if (action.hydration?.quiz && !workbench.quiz.payload) {
+        workbench = {
+          ...workbench,
+          quiz: { ...initialQuizState, payload: action.hydration.quiz },
+        };
+      }
       return {
         ...state,
         items: mergeHistory(state.items, action.items),
         history: 'ready',
         historyError: null,
+        workbench,
       };
+    }
     case 'history-loading':
       return { ...state, history: 'loading', historyError: null };
     case 'history-error':
@@ -265,11 +460,100 @@ export function turnStreamReducer(
         connection: state.connection,
         history: state.history,
       };
+
+    case 'exercise-submitted':
+      return {
+        ...state,
+        workbench: {
+          ...state.workbench,
+          exercise: {
+            ...state.workbench.exercise,
+            phase: 'grading',
+            verdict: null,
+            feedback: '',
+            attempts: state.workbench.exercise.attempts + 1,
+            submitError: null,
+          },
+        },
+      };
+    case 'exercise-submit-failed':
+      // The POST never reached the grader — roll back the optimistic attempt.
+      return {
+        ...state,
+        workbench: {
+          ...state.workbench,
+          exercise: {
+            ...state.workbench.exercise,
+            phase: 'editing',
+            attempts: Math.max(0, state.workbench.exercise.attempts - 1),
+            submitError: action.message,
+          },
+        },
+      };
+    case 'exercise-grading-in-progress':
+      // A prior attempt is still grading (409): this submit didn't count, but
+      // the panel stays in "Grading…" — the verdict is on its way over WS.
+      return {
+        ...state,
+        workbench: {
+          ...state.workbench,
+          exercise: {
+            ...state.workbench.exercise,
+            phase: 'grading',
+            attempts: Math.max(1, state.workbench.exercise.attempts - 1),
+            submitError: null,
+          },
+        },
+      };
+    case 'exercise-try-again':
+      return {
+        ...state,
+        workbench: {
+          ...state.workbench,
+          exercise: {
+            ...state.workbench.exercise,
+            phase: 'editing',
+            verdict: null,
+            feedback: '',
+            submitError: null,
+          },
+        },
+      };
+    case 'quiz-submitted':
+      return {
+        ...state,
+        workbench: {
+          ...state.workbench,
+          quiz: { ...state.workbench.quiz, phase: 'grading', submitError: null },
+        },
+      };
+    case 'quiz-submit-failed':
+      return {
+        ...state,
+        workbench: {
+          ...state.workbench,
+          quiz: { ...state.workbench.quiz, phase: 'answering', submitError: action.message },
+        },
+      };
   }
 }
 
-/** ItemMirror payload for `kind: "message"` rows (task #11 contract): `{text}`. */
-const messagePayloadSchema = z.object({ text: z.string() });
+/**
+ * ItemMirror payload for `kind: "message"` rows (task #11 contract): `{text}`.
+ * System rows (grading turns) also carry `caption` — the short human line the
+ * chat shows instead of the full internal instruction text.
+ */
+const messagePayloadSchema = z.object({ text: z.string(), caption: z.string().optional() });
+
+/** The auto-greeting trigger row (ThreadManager.GREETING_INPUT) — the one
+ * caption-less system row that is safe to pass through (message-bubble maps
+ * it to "Session started"). */
+const GREETING_INPUT = '[session-start]';
+
+/** Render-time fallback for caption-less system rows: their `text` is a raw
+ * server instruction (e.g. a pre-caption grading turn — QA finding F1) and
+ * must NEVER reach the chat, no matter what the server wrote. */
+const SYSTEM_FALLBACK_CAPTION = 'The tutor ran a task in the background.';
 
 export function threadItemToChatMessage(item: ThreadItem): ChatMessage | null {
   if (item.kind !== 'message') return null;
@@ -278,7 +562,83 @@ export function threadItemToChatMessage(item: ThreadItem): ChatMessage | null {
     console.warn('thread item payload missing {text}, skipping', item.id);
     return null;
   }
-  return { id: item.id, role: item.role, text: parsed.data.text };
+  let text = parsed.data.text;
+  if (item.role === 'system' && text !== GREETING_INPUT) {
+    text = parsed.data.caption ?? SYSTEM_FALLBACK_CAPTION;
+  }
+  return { id: item.id, role: item.role, text };
+}
+
+/**
+ * What the `history` action restores into empty workbench slots. The exercise
+ * side is a full slice state (payload + grading lifecycle from the exercise
+ * DTO); the quiz side is payload-only — quiz verdicts aren't queryable, so a
+ * reloaded quiz starts back at `answering` (retaking is harmless in learn
+ * mode; the mastery evidence already reached the agent).
+ */
+export interface WorkbenchHydration {
+  exercise?: WorkbenchExerciseState;
+  quiz?: QuizPayload;
+}
+
+/** The latest mirrored payloads of each kind, before DTO enrichment. */
+export interface WorkbenchMirrorPayloads {
+  exercise?: ExercisePayload;
+  quiz?: QuizPayload;
+}
+
+/**
+ * Rebuilds workbench content from mirrored history (task #15 contract):
+ * `exercise_ref` and `quiz` ItemMirror rows carry the full client-safe
+ * payloads; artifacts are WS-only and vanish on reload by design. The last
+ * payload of each kind wins; malformed payloads are warned and skipped.
+ */
+export function deriveWorkbenchHydration(items: ThreadItem[]): WorkbenchMirrorPayloads {
+  const hydration: WorkbenchMirrorPayloads = {};
+  for (const item of items) {
+    if (item.kind === 'exercise_ref') {
+      const parsed = exercisePayloadSchema.safeParse(item.payload);
+      if (parsed.success) hydration.exercise = parsed.data;
+      else console.warn('exercise_ref payload failed exercisePayloadSchema, skipping', item.id);
+    } else if (item.kind === 'quiz') {
+      const parsed = quizPayloadSchema.safeParse(item.payload);
+      if (parsed.success) hydration.quiz = parsed.data;
+      else console.warn('quiz item payload failed quizPayloadSchema, skipping', item.id);
+    }
+  }
+  return hydration;
+}
+
+/**
+ * Restored exercise slice for a mirrored payload, enriched with the grading
+ * lifecycle from `GET /api/exercises/:id` so a reload lands where the learner
+ * left off: an ungraded attempt → still "grading" (the verdict arrives over
+ * the reconnected socket), a graded exercise → verdict + feedback restored,
+ * otherwise → editing. Without a DTO (fetch failed) the payload alone renders.
+ */
+export function hydratedExerciseState(
+  payload: ExercisePayload,
+  dto: ExerciseDto | null,
+): WorkbenchExerciseState {
+  const base: WorkbenchExerciseState = { ...initialExerciseState, payload };
+  if (!dto || dto.id !== payload.id) return base;
+  const attempts = dto.attempts ?? [];
+  const withAttempts = { ...base, attempts: attempts.length };
+  if (attempts.some((attempt) => attempt.verdict === null)) {
+    return { ...withAttempts, phase: 'grading' };
+  }
+  const lastGraded = [...attempts]
+    .reverse()
+    .find((attempt) => attempt.verdict === 'passed' || attempt.verdict === 'failed');
+  if (lastGraded && (dto.status === 'passed' || dto.status === 'failed')) {
+    return {
+      ...withAttempts,
+      phase: 'graded',
+      verdict: lastGraded.verdict as ExerciseVerdict,
+      feedback: lastGraded.feedback ?? '',
+    };
+  }
+  return withAttempts;
 }
 
 /** Parse one raw WS frame; invalid frames → console.warn + null (never rendered). */
@@ -316,6 +676,8 @@ export interface TurnStream {
   send: (text: string) => boolean;
   /** Re-runs the history fetch (retry path for the error state). */
   refetchHistory: () => void;
+  /** Workbench submission lifecycle (the only client-driven reducer channel). */
+  dispatch: (action: WorkbenchClientAction) => void;
 }
 
 export function useTurnStream(threadId: string, options?: UseTurnStreamOptions): TurnStream {
@@ -327,11 +689,23 @@ export function useTurnStream(threadId: string, options?: UseTurnStreamOptions):
   const fetchHistory = useCallback(() => {
     dispatch({ type: 'history-loading' });
     getThreadItems(threadId)
-      .then(({ items }) => {
+      .then(async ({ items }) => {
         const messages = items
           .map(threadItemToChatMessage)
           .filter((item): item is ChatMessage => item !== null);
-        dispatch({ type: 'history', items: messages });
+        const mirror = deriveWorkbenchHydration(items);
+        const hydration: WorkbenchHydration = {};
+        if (mirror.quiz) hydration.quiz = mirror.quiz;
+        if (mirror.exercise) {
+          let dto: ExerciseDto | null = null;
+          try {
+            dto = await getExercise(mirror.exercise.id);
+          } catch {
+            // Verdict enrichment is best-effort — the payload alone still renders.
+          }
+          hydration.exercise = hydratedExerciseState(mirror.exercise, dto);
+        }
+        dispatch({ type: 'history', items: messages, hydration });
       })
       .catch((err: unknown) => {
         // A real-shaped id for a thread that isn't yours: terminal not-found,
@@ -424,5 +798,7 @@ export function useTurnStream(threadId: string, options?: UseTurnStreamOptions):
     return true;
   }, []);
 
-  return { state, send, refetchHistory: fetchHistory };
+  const dispatchClient = useCallback((action: WorkbenchClientAction) => dispatch(action), []);
+
+  return { state, send, refetchHistory: fetchHistory, dispatch: dispatchClient };
 }

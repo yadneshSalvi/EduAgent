@@ -70,6 +70,7 @@ export const wsRoutes: FastifyPluginAsync = async (app) => {
           req.log.error({ err, threadId }, 'user.message turn failed to start');
           gateway.emitToThread(threadId, {
             type: 'turn.error',
+            threadId,
             message: 'The tutor is reconnecting to its backend. Try again in a moment.',
             retryable: true,
           });

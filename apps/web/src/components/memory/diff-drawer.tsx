@@ -7,6 +7,7 @@ import { GitCommitHorizontal, X } from 'lucide-react';
 import type { MemoryCommit } from '@eduagent/shared';
 import { DeltaBar } from './delta-bar';
 import { commitBadge, formatDiffStats, shortSha } from '@/lib/commit-format';
+import { MONACO_FONT_FAMILY, defineEduAgentTheme } from '@/lib/monaco-theme';
 import { languageForPath, parseUnifiedDiff } from '@/lib/unified-diff';
 import { cn } from '@/lib/utils';
 
@@ -25,28 +26,6 @@ const MonacoDiff = dynamic(() => import('@monaco-editor/react').then((m) => m.Di
     </div>
   ),
 });
-
-/** Monaco theme on the 05 §2 dark tokens (hex — Monaco can't read CSS vars). */
-function defineEduAgentTheme(monaco: typeof import('monaco-editor')) {
-  monaco.editor.defineTheme('eduagent-dark', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#12151D',
-      'editorGutter.background': '#12151D',
-      'editor.lineHighlightBackground': '#1A1E2880',
-      'editorLineNumber.foreground': '#8B93A766',
-      'editorLineNumber.activeForeground': '#8B93A7',
-      'diffEditor.insertedTextBackground': '#2EA04326',
-      'diffEditor.removedTextBackground': '#F851491F',
-      'diffEditor.insertedLineBackground': '#2EA04318',
-      'diffEditor.removedLineBackground': '#F8514912',
-      'scrollbarSlider.background': '#252A3780',
-      'scrollbarSlider.hoverBackground': '#252A37',
-    },
-  });
-}
 
 export const DIFF_DRAWER_DEFAULT_HEADER = 'EduAgent updated its memory of you.';
 
@@ -85,7 +64,12 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
   return (
     <AnimatePresence>
       {commit ? (
-        <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Memory commit diff">
+        <div
+          className="fixed inset-0 z-[60]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Memory commit diff"
+        >
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -202,8 +186,7 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
                         folding: false,
                         renderOverviewRuler: false,
                         fontSize: 13,
-                        fontFamily:
-                          "var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, Menlo, monospace",
+                        fontFamily: MONACO_FONT_FAMILY,
                         padding: { top: 12, bottom: 12 },
                         hideUnchangedRegions: { enabled: false },
                         scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },

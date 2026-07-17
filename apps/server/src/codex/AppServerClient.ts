@@ -64,7 +64,7 @@ interface PendingRequest {
   reject: (err: Error) => void;
 }
 
-interface WireMessage {
+export interface WireMessage {
   id?: number | string;
   method?: string;
   params?: unknown;
@@ -76,6 +76,53 @@ type ClientState = 'idle' | 'starting' | 'running' | 'restarting' | 'closed';
 
 const defaultSpawn: SpawnAppServer = (bin, args, options) =>
   spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'], env: options.env });
+
+/**
+ * Debug-level jsonrpc logs must not leak the per-thread MCP sessionToken
+ * (Phase 2 carry-over f). It rides the wire in three places:
+ *   - OUT: `developerInstructions` on thread/start/resume/fork params
+ *     (results only list instruction source PATHS);
+ *   - IN: `mcpToolCall` item events — `item.arguments` carries the raw
+ *     `session_token` argument of every ui_* call;
+ *   - IN: `mcpServer/elicitation/request` params — `_meta.tool_params`
+ *     repeats those arguments for the approval prompt.
+ */
+export function redactForLog(msg: WireMessage): WireMessage {
+  const params = msg.params;
+  if (typeof params !== 'object' || params === null || Array.isArray(params)) return msg;
+  let record = params as Record<string, unknown>;
+  let changed = false;
+
+  if (typeof record.developerInstructions === 'string') {
+    record = { ...record, developerInstructions: '[redacted]' };
+    changed = true;
+  }
+
+  const item = record.item;
+  if (
+    typeof item === 'object' &&
+    item !== null &&
+    !Array.isArray(item) &&
+    (item as Record<string, unknown>).type === 'mcpToolCall' &&
+    (item as Record<string, unknown>).arguments !== undefined
+  ) {
+    record = { ...record, item: { ...item, arguments: '[redacted]' } };
+    changed = true;
+  }
+
+  const meta = record._meta;
+  if (
+    typeof meta === 'object' &&
+    meta !== null &&
+    !Array.isArray(meta) &&
+    (meta as Record<string, unknown>).tool_params !== undefined
+  ) {
+    record = { ...record, _meta: { ...meta, tool_params: '[redacted]' } };
+    changed = true;
+  }
+
+  return changed ? { ...msg, params: record } : msg;
+}
 
 export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
   private readonly codexBin: string;
@@ -542,10 +589,10 @@ export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
   private send(msg: WireMessage): void {
     const child = this.child;
     if (child?.stdin == null) {
-      this.log.warn({ msg }, 'dropping outbound message — no child');
+      this.log.warn({ msg: redactForLog(msg) }, 'dropping outbound message — no child');
       return;
     }
-    this.log.debug({ dir: 'out', msg }, 'jsonrpc');
+    this.log.debug({ dir: 'out', msg: redactForLog(msg) }, 'jsonrpc');
     child.stdin.write(`${JSON.stringify(msg)}\n`);
   }
 
@@ -567,7 +614,7 @@ export class AppServerClient extends EventEmitter<AppServerClientEventMap> {
   }
 
   private routeMessage(msg: WireMessage): void {
-    this.log.debug({ dir: 'in', msg }, 'jsonrpc');
+    this.log.debug({ dir: 'in', msg: redactForLog(msg) }, 'jsonrpc');
     if (typeof msg.method === 'string' && msg.id !== undefined) {
       this.handleServerRequest(msg.id, msg.method, msg.params);
     } else if (msg.id !== undefined) {
