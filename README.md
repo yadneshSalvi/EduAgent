@@ -238,7 +238,10 @@ conversation.
 <summary><b>Troubleshooting</b></summary>
 
 - **Port 3000 already in use** — run `WEB_PORT=3105 pnpm dev` (the server reads `WEB_PORT` too,
-  for its CORS allowlist). Agent host port: `SERVER_PORT`; MCP relay: `RELAY_PORT` (:8788).
+  for its CORS allowlist).
+- **Moving the agent host off :8787?** Set the pair together — the web client defaults to 8787:
+  `SERVER_PORT=8797 NEXT_PUBLIC_SERVER_URL=http://localhost:8797 pnpm dev` (and `RELAY_PORT` if
+  :8788 is also taken). Symptom of forgetting: the login page renders with no profiles and no error.
 - **Clerk keys?** Not needed locally. `AUTH_MODE=local` swaps in a cookie-session provider with
   a profile picker — the Clerk placeholders in `.env.example` can stay as-is.
 - **`NEXT_PUBLIC_SERVER_URL`** is baked at **build time** for production builds. `pnpm dev`
