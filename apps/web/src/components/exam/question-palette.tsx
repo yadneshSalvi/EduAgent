@@ -25,9 +25,9 @@ export function QuestionPalette({
           title={`Question ${item.number}${item.answered ? ' · answered' : ' · unanswered'}${item.flagged ? ' · flagged' : ''}`}
           aria-label={`Go to question ${item.number}${item.answered ? ', answered' : ', unanswered'}${item.flagged ? ', flagged' : ''}`}
           className={cn(
-            'relative flex size-7 items-center justify-center rounded-sm border font-mono text-caption transition-colors duration-150',
+            'relative flex size-10 items-center justify-center rounded-sm border font-mono text-caption transition-colors duration-150',
             item.answered
-              ? 'border-primary/50 bg-accent-soft text-primary'
+              ? 'border-primary/50 bg-accent-soft text-primary-legible'
               : 'text-muted-foreground hover:border-primary/50 hover:text-foreground',
           )}
         >

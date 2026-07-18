@@ -29,8 +29,9 @@ function TreeNode({
         <button
           type="button"
           aria-expanded={open}
+          title={node.name}
           onClick={() => setOpen((current) => !current)}
-          className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 font-mono text-caption text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
+          className="flex h-10 w-full items-center gap-1.5 rounded-sm px-2 font-mono text-caption text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
           style={{ paddingLeft: `${depth * 14 + 8}px` }}
         >
           <ChevronRight
@@ -63,11 +64,12 @@ function TreeNode({
       <button
         type="button"
         aria-current={selected ? 'true' : undefined}
+        title={node.name}
         onClick={() => onSelect(node.path)}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-sm px-2 py-1 font-mono text-caption transition-colors duration-150',
+          'flex h-10 w-full items-center gap-1.5 rounded-sm px-2 font-mono text-caption transition-colors duration-150',
           selected
-            ? 'bg-accent-soft text-primary'
+            ? 'bg-accent-soft text-primary-legible'
             : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
         )}
         style={{ paddingLeft: `${depth * 14 + 22}px` }}

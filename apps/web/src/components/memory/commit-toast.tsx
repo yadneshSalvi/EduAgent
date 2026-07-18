@@ -110,7 +110,7 @@ export function CommitToast({ commit, onOpen, onDismiss }: CommitToastProps) {
         className="w-full cursor-pointer rounded-lg border bg-surface p-4 text-left shadow-overlay transition-colors duration-150 hover:border-primary/50"
       >
         <div className="flex items-center gap-2">
-          <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 font-mono text-caption text-primary">
+          <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 font-mono text-caption text-primary-legible">
             {commitBadge(commit)}
           </span>
           <span className="flex items-center gap-1 font-mono text-caption text-muted-foreground">
@@ -125,7 +125,9 @@ export function CommitToast({ commit, onOpen, onDismiss }: CommitToastProps) {
               event.stopPropagation();
               onDismiss();
             }}
-            className="rounded-sm p-0.5 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+            // Negative margins keep the toast header visually compact while the
+            // clickable box meets the 05 §9 ≥40px target.
+            className="-my-2 -mr-2 flex size-10 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:text-foreground"
           >
             <X className="size-3.5" aria-hidden />
           </button>

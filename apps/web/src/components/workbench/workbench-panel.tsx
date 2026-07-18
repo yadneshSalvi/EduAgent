@@ -148,9 +148,10 @@ export function WorkbenchPanel({
                 tabIndex={activeTab === tab ? 0 : -1}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 font-mono text-caption transition-colors duration-150',
+                  // h-10 = the 05 §9 ≥40px hit target (Phase 2 review carry-over).
+                  'flex h-10 items-center gap-1.5 rounded-sm px-3 font-mono text-caption transition-colors duration-150',
                   activeTab === tab
-                    ? 'bg-accent-soft text-primary'
+                    ? 'bg-accent-soft text-primary-legible'
                     : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
                 )}
               >
@@ -173,7 +174,7 @@ export function WorkbenchPanel({
             type="button"
             aria-label="Collapse workbench"
             onClick={() => toggle(false)}
-            className="rounded-sm p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
+            className="flex size-10 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
           >
             <PanelRightClose className="size-4" aria-hidden />
           </button>
@@ -254,7 +255,7 @@ export function WorkbenchPanel({
               type="button"
               onClick={() => toggle(true)}
               aria-label="Open workbench"
-              className="rounded-sm p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
+              className="flex size-10 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
             >
               <PanelRightOpen className="size-4" aria-hidden />
             </button>
@@ -264,19 +265,19 @@ export function WorkbenchPanel({
                 type="button"
                 onClick={() => toggle(true, tab)}
                 aria-label={`Open workbench — ${label}`}
-                className="relative rounded-sm p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
+                className="relative flex size-10 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
               >
                 <Icon className="size-4" aria-hidden />
                 {hasContent[tab] ? (
                   <span
                     aria-hidden
-                    className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary"
+                    className="absolute right-2 top-2 size-1.5 rounded-full bg-primary"
                   />
                 ) : null}
               </button>
             ))}
             <span
-              className="mt-2 font-mono text-caption tracking-wide text-muted-foreground/70"
+              className="mt-2 font-mono text-caption tracking-wide text-muted-foreground"
               style={{ writingMode: 'vertical-rl' }}
             >
               workbench

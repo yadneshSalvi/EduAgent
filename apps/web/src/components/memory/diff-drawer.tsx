@@ -106,7 +106,7 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
           </p>
           <div className="flex-1" />
           <span className="hidden items-center gap-2 font-mono text-caption text-muted-foreground sm:flex">
-            <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 text-primary">
+            <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 text-primary-legible">
               {commitBadge(shown)}
             </span>
             <GitCommitHorizontal className="size-3.5" aria-hidden />
@@ -117,7 +117,7 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
             type="button"
             onClick={onClose}
             aria-label="Close diff drawer"
-            className="rounded-md p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
+            className="flex size-10 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground"
           >
             <X className="size-4" aria-hidden />
           </button>
@@ -141,7 +141,7 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
             ) : null}
             {shown.deltas.length > 0 ? (
               <div className="flex flex-col gap-2.5">
-                <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+                <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
                   mastery deltas
                 </p>
                 {shown.deltas.map((delta, index) => (
@@ -157,16 +157,16 @@ export function DiffDrawer({ commit, onClose, headerLine }: DiffDrawerProps) {
           {/* Right — the diff itself, first-class and beautiful (00 §8). */}
           <div className="flex min-h-0 min-w-0 flex-col">
             {files.length > 1 ? (
-              <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-2">
+              <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-1.5">
                 {files.map((file, index) => (
                   <button
                     key={file.path}
                     type="button"
                     onClick={() => setActiveIndex(index)}
                     className={cn(
-                      'shrink-0 rounded-sm px-2 py-1 font-mono text-caption transition-colors duration-150',
+                      'flex h-10 shrink-0 items-center rounded-sm px-2.5 font-mono text-caption transition-colors duration-150',
                       index === activeIndex
-                        ? 'bg-accent-soft text-primary'
+                        ? 'bg-accent-soft text-primary-legible'
                         : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
                     )}
                   >

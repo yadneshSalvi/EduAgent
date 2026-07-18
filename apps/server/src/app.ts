@@ -5,6 +5,7 @@ import Fastify, {
 } from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import type { PrismaClient } from '@prisma/client';
 import { authRoutes } from './api/auth.js';
@@ -18,7 +19,7 @@ import { quizRoutes } from './api/quiz.js';
 import { reviewRoutes } from './api/review.js';
 import { threadRoutes } from './api/threads.js';
 import { wsRoutes } from './api/ws.js';
-import { createAuthProvider, type AuthedUser } from './auth/index.js';
+import { createAuthProvider, type AuthedUser, type DemoClerkClient } from './auth/index.js';
 import type { HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
 import type { DashboardService, ExamService, ReviewService } from './learning/index.js';
@@ -31,6 +32,8 @@ declare module 'fastify' {
     prisma: PrismaClient;
     /** Resolves the current user from the request (Clerk JWT or local cookie). */
     resolveUser(req: FastifyRequest): Promise<AuthedUser | null>;
+    /** Test-injected Clerk Backend API fake; demo-login builds the real one lazily. */
+    demoClerk?: DemoClerkClient;
     /** Phase 1 services — absent when boot ran without codex (some tests). */
     workspaces?: WorkspaceManager;
     threads?: ThreadService;
@@ -69,6 +72,8 @@ export interface BuildAppDeps {
    * tests: thread routes then 503 and WS gateways close(1013).
    */
   services?: AppServiceSet | ((app: FastifyInstance) => Promise<AppServiceSet> | AppServiceSet);
+  /** Fake Clerk Backend API for demo-login tests; production omits it. */
+  demoClerk?: DemoClerkClient;
 }
 
 /**
@@ -76,14 +81,27 @@ export interface BuildAppDeps {
  * Boot-order concerns outside the HTTP app (Prisma connect, listen, process
  * signals) are src/index.ts's job — this stays test-injectable.
  */
-export async function buildApp({ config, prisma, services }: BuildAppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: loggerOptions(config) });
+export async function buildApp({
+  config,
+  prisma,
+  services,
+  demoClerk,
+}: BuildAppDeps): Promise<FastifyInstance> {
+  // RATE_LIMITS=1 means "hosted behind Caddy" — trust X-Forwarded-For so the
+  // limiter buckets real client IPs, not Caddy's container address.
+  const app = Fastify({ logger: loggerOptions(config), trustProxy: config.rateLimits });
 
   app.decorate('appConfig', config);
   app.decorate('prisma', prisma);
   const authProvider = createAuthProvider(config, prisma);
   app.decorate('resolveUser', (req: FastifyRequest) => authProvider.resolveUser(req));
+  if (demoClerk) app.decorate('demoClerk', demoClerk);
 
+  if (config.rateLimits) {
+    // Global per-IP flood guard (plans/08 §5). Route overrides: /healthz is
+    // exempt (uptime pinger), credential routes get a tight bucket (auth.ts).
+    await app.register(rateLimit, { global: true, max: 300, timeWindow: '1 minute' });
+  }
   await app.register(cookie, { secret: config.sessionSecret });
   await app.register(cors, {
     origin: config.corsOrigins,

@@ -1,18 +1,20 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { LandingFeatures } from '@/components/landing/landing-features';
 
 /**
- * Landing (plans/04 §9): minimal dark hero — name, tagline, one-line pitch,
- * CTA to /login. Doubles as the video intro shot; feature beats with real
- * screenshots land in Phase 5.
+ * Landing (plans/04 §9): single scroll, dark hero — name, tagline, one-line
+ * pitch, CTA to /login — then three feature beats with real screenshots from
+ * the seeded demo world and an animated mock commit toast. Opens the video
+ * and the README.
  */
 export default function LandingPage() {
   return (
-    <main className="relative flex min-h-dvh flex-col overflow-hidden">
+    <main className="relative flex min-h-dvh flex-col overflow-x-clip">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 -top-1/4 h-2/3 bg-[radial-gradient(ellipse_50%_100%_at_50%_0%,var(--accent-soft),transparent_70%)]"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[80vh] bg-[radial-gradient(ellipse_50%_100%_at_50%_0%,var(--accent-soft),transparent_70%)]"
       />
 
       <header className="relative flex h-16 items-center justify-between px-8">
@@ -22,7 +24,7 @@ export default function LandingPage() {
         </Button>
       </header>
 
-      <section className="relative flex flex-1 flex-col items-center justify-center gap-8 px-6 pb-24 text-center">
+      <section className="relative flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center gap-8 px-6 pb-24 text-center">
         <p className="font-mono text-caption text-muted-foreground">
           an AI tutor whose memory of you is a git repository
         </p>
@@ -54,8 +56,26 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer className="relative flex h-14 items-center justify-center">
-        <p className="font-mono text-caption text-muted-foreground/70">
+      <LandingFeatures />
+
+      <section className="relative flex flex-col items-center gap-6 px-6 pb-28 text-center">
+        <h2 className="max-w-2xl font-display text-h2 font-medium tracking-tight text-balance">
+          Your memory starts at commit zero.
+        </h2>
+        <p className="max-w-lg text-body text-muted-foreground">
+          Five minutes of onboarding and the tutor writes its first commit about you. Everything
+          after that, it remembers.
+        </p>
+        <Button asChild size="lg">
+          <Link href="/login">
+            Start learning
+            <ArrowRight aria-hidden />
+          </Link>
+        </Button>
+      </section>
+
+      <footer className="relative flex h-14 items-center justify-center border-t">
+        <p className="font-mono text-caption text-muted-foreground">
           built on codex · your memory is yours
         </p>
       </footer>

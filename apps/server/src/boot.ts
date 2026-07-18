@@ -9,7 +9,12 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
 import { WsGateway } from './api/gateway.js';
-import { AppServerClient, type CodexLogger, type ElicitationApprover, type HealthProbe } from './codex/index.js';
+import {
+  AppServerClient,
+  type CodexLogger,
+  type ElicitationApprover,
+  type HealthProbe,
+} from './codex/index.js';
 import type { AppConfig } from './config.js';
 import { DashboardService, ExamService, ReviewService } from './learning/index.js';
 import { installedSkillsRoot, SKILL_NAMES } from './prompts/index.js';
@@ -107,7 +112,15 @@ export async function createServices({
     // memory commits drops that user's cached DashboardData.
     onMemoryChanged: (userId) => dashboard.invalidate(userId),
   });
-  threads = new ThreadManager({ prisma, client, workspaces, memory, sink: gateway, logger });
+  threads = new ThreadManager({
+    prisma,
+    client,
+    workspaces,
+    memory,
+    sink: gateway,
+    logger,
+    dailyTurnQuota: config.dailyTurnQuota,
+  });
   const review = new ReviewService({ prisma, workspaces, threads, logger });
   const exams = new ExamService({ prisma, workspaces, threads, dashboard, sink: gateway, logger });
   // Deadline enforcement (plans/03 §3.5): expired in_progress exams
@@ -160,9 +173,7 @@ async function assertSkillsVisible(
   logger: CodexLogger,
 ): Promise<void> {
   const listed = await client.listSkills([config.dataDir]);
-  const visible = new Set(
-    listed.data.flatMap((entry) => entry.skills.map((skill) => skill.name)),
-  );
+  const visible = new Set(listed.data.flatMap((entry) => entry.skills.map((skill) => skill.name)));
   const missing = SKILL_NAMES.filter((name) => !visible.has(name));
   if (missing.length > 0) {
     throw new Error(

@@ -78,7 +78,7 @@ describe('AUTH_MODE=clerk auth', () => {
   });
 });
 
-describe('POST /auth/demo-login (stub until Phase 5)', () => {
+describe('POST /auth/demo-login gates (the Clerk path lives in demo-login.test.ts)', () => {
   it('rejects a wrong access code with 403', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -88,15 +88,14 @@ describe('POST /auth/demo-login (stub until Phase 5)', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('answers 501 for the correct access code, pointing at Phase 5', async () => {
+  it('404s no_demo_user for the correct code when nothing is seeded', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/auth/demo-login',
       payload: { accessCode: 'open-sesame' },
     });
-    expect(res.statusCode).toBe(501);
-    expect(res.json()).toMatchObject({ error: 'not_implemented' });
-    expect(JSON.stringify(res.json())).toContain('Phase 5');
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toMatchObject({ error: 'no_demo_user' });
   });
 
   it('rejects a missing body with 400', async () => {

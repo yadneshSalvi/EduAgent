@@ -10,6 +10,7 @@ import {
   Flame,
   Loader2,
   MinusCircle,
+  RefreshCw,
   RotateCcw,
   XCircle,
 } from 'lucide-react';
@@ -238,7 +239,11 @@ function SessionSummary({ stats, onDone }: { stats: ReviewSessionStats; onDone: 
         {dashboard && dashboard.user.streakDays > 0 ? (
           <span className="flex items-center gap-1 font-mono text-caption text-warn">
             <Flame className="size-3.5" aria-hidden />
-            <span className="numeric">{dashboard.user.streakDays}</span>-day streak
+            {/* One flex item — gap-1 must not split "13" from "-day streak". */}
+            <span>
+              <span className="numeric">{dashboard.user.streakDays}</span>
+              -day streak
+            </span>
           </span>
         ) : null}
       </div>
@@ -305,13 +310,16 @@ function ReviewSession({ threadId, onExit }: { threadId: string; onExit: () => v
       !gradedQuizIds.current.has(payload.id)
     ) {
       gradedQuizIds.current.add(payload.id);
-      dispatchStats({ type: 'quiz-graded', results: quiz.results });
+      dispatchStats({ type: 'quiz-graded', quizId: payload.id, results: quiz.results });
     }
   }, [quiz.phase, quiz.results, quiz.payload]);
 
   const onFinishQuiz = (answers: SubmitQuizRequest['answers']) => {
     const quizId = quiz.payload?.id;
     if (!quizId) return;
+    // Client-checked mcq/predict verdicts count immediately; the server's
+    // quiz.graded results overwrite per question (dedupe lives in the reducer).
+    dispatchStats({ type: 'answers-submitted', quizId, answers });
     dispatch({ type: 'quiz-submitted' });
     submitQuiz(quizId, { answers }).catch((err: unknown) => {
       dispatch({
@@ -329,6 +337,13 @@ function ReviewSession({ threadId, onExit }: { threadId: string; onExit: () => v
     }
     void queryClient.invalidateQueries({ queryKey: ['review', 'queue'] });
     void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  };
+
+  // Most review turns are tutor-driven (grading, next item), so a dead turn
+  // often has no user message to resend — a nudge restarts the loop instead.
+  const retryTurn = () => {
+    const lastUser = [...state.items].reverse().find((item) => item.role === 'user');
+    send(lastUser?.text ?? 'Keep the review going — pick up where you left off.');
   };
 
   if (ended) {
@@ -396,6 +411,21 @@ function ReviewSession({ threadId, onExit }: { threadId: string; onExit: () => v
               </div>
             ) : null}
             <ActivityChips chips={state.activityChips} />
+
+            {state.error ? (
+              <div
+                role="alert"
+                className="flex items-center justify-between gap-4 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3"
+              >
+                <p className="text-body-sm">{state.error.message}</p>
+                {state.error.retryable ? (
+                  <Button size="sm" variant="outline" onClick={retryTurn} className="shrink-0 gap-1.5">
+                    <RefreshCw className="size-3.5" aria-hidden />
+                    Retry
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
 
             {quiz.payload ? (
               <div className="min-h-[320px] rounded-lg border bg-surface">

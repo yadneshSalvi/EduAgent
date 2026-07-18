@@ -287,3 +287,38 @@ Invocation: see `docker-compose.local.yml` header. All green unless noted:
 - `codex debug` on 0.144.4 has **no** landlock/sandbox subcommand (only
   `models` / `app-server` / `prompt-input`) — the step 7 probe therefore
   goes through `codex exec`, which needs a real API key.
+
+## 12. Demo login ("Explore as Alex") — deploy-day activation (Phase 5D)
+
+The full ticket round-trip (access code → `POST /auth/demo-login` → Clerk
+sign-in token → `signIn.ticket()` in the browser → `/app` as Alex) was proven
+locally on 2026-07-18 against the **dev** Clerk instance (`pk_test_`). The
+production instance is domain-bound, so repeat the proof once on the real
+origin:
+
+1. `.env.production` must set `ACCESS_CODE`, the `pk_live_`/`sk_live_` Clerk
+   keys, `DAILY_TURN_QUOTA=60`, `RATE_LIMITS=1` (all in
+   `.env.production.example`).
+2. In the Clerk dashboard the **production instance** must have
+   `eduagent.aiquantized.com` as its app domain (DNS + certs per Clerk's
+   production checklist). No extra allowed-origin config was needed for the
+   ticket strategy on the dev instance.
+3. After the first seed, mint once from a workstation:
+   `curl -sX POST https://eduagent.aiquantized.com/auth/demo-login -H 'content-type: application/json' -d '{"accessCode":"<the code>"}'`
+   → expect `{token, userId}`. This creates AND links the **production**
+   standing Clerk user (the dev instance's standing user is
+   `user_3GfEv7w07YTEzKY6xCClas2xVyj` — per-instance, not reused). Record the
+   prod `userId` here: _pending_.
+4. Browser proof on the real origin: `/login` → access code → "Enter the
+   demo" → dashboard shows "Welcome back, Alex". This also runs the warm
+   greeting turn §8 asks for after resets.
+5. Resilience notes: the nightly reset preserves `User.authId`, and even a
+   from-scratch DB **relinks automatically** — demo-login looks the standing
+   user up by its unique demo email (`alex.demo@eduagent.aiquantized.com`)
+   before ever creating one. A judge already signed into a personal Clerk
+   session may hit the single-session edge (clerk/javascript#8219) — the card
+   surfaces a clean error; sign out of the personal session first.
+6. Rate-limit smoke: 11 rapid demo-login POSTs from one IP → the 11th is 429;
+   `/healthz` stays unthrottled for UptimeRobot. Quota smoke (optional):
+   set `DAILY_TURN_QUOTA=1`, send two chat messages as a throwaway profile —
+   the second must show the terminal daily-limit error, then restore 60.

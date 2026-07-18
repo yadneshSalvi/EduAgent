@@ -93,7 +93,7 @@ export function LocalProfilePicker() {
               disabled={busyHandle !== null}
               onClick={() => void signIn(user.handle)}
             >
-              <span className="flex size-8 items-center justify-center rounded-full bg-accent-soft text-primary">
+              <span className="flex size-8 items-center justify-center rounded-full bg-accent-soft text-primary-legible">
                 {busyHandle === user.handle ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden />
                 ) : (
@@ -157,7 +157,7 @@ export function LocalProfilePicker() {
           </p>
         ) : null}
 
-        <p className="font-mono text-caption text-muted-foreground/80">AUTH_MODE=local</p>
+        <p className="font-mono text-caption text-muted-foreground">AUTH_MODE=local</p>
       </CardContent>
     </Card>
   );

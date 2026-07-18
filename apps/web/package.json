@@ -4,8 +4,8 @@
   "private": true,
   "description": "EduAgent web app — Next.js App Router, Tailwind v4 + shadcn/ui, Clerk auth (see plans/04_frontend.md)",
   "scripts": {
-    "dev": "node scripts/next-with-port.mjs dev",
-    "build": "next build",
+    "dev": "node scripts/vendor-monaco.mjs && node scripts/next-with-port.mjs dev",
+    "build": "node scripts/vendor-monaco.mjs && next build",
     "start": "node scripts/next-with-port.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

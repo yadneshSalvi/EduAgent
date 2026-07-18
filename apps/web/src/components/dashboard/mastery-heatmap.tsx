@@ -202,6 +202,18 @@ export function MasteryHeatmap({ topics }: { topics: DashboardData['topics'] }) 
         </p>
       </header>
 
+      {topics.length === 0 ? (
+        <div className="flex flex-col items-start gap-3 py-2">
+          <p className="text-body-sm text-muted-foreground">
+            Every concept you touch gets a mastery score — one cell per concept, filled from your
+            commits (e.g. <span className="font-mono text-caption">left-join 0.62</span>).
+          </p>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/app/learn">Start learning</Link>
+          </Button>
+        </div>
+      ) : null}
+
       {topics.map((topic) => {
         const avg =
           topic.concepts.length > 0

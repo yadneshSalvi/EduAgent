@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import type { RawData } from 'ws';
 import { clientWsEventSchema, type WsEvent } from '@eduagent/shared';
 import type { AuthedUser } from '../auth/index.js';
+import { DailyTurnQuotaError } from '../threads/index.js';
 
 /**
  * The WS gateway (plans/03 §7):
@@ -80,6 +81,9 @@ export const wsRoutes: FastifyPluginAsync = async (app) => {
         // user.message: fire-and-forget through the per-thread queue; failures
         // to even start the turn surface as a retryable turn.error.
         threads.startTurn(thread, parsed.text).catch((err: unknown) => {
+          // Quota refusals already emitted their terminal (retryable:false)
+          // turn.error — the generic retryable one would contradict it.
+          if (err instanceof DailyTurnQuotaError) return;
           req.log.error({ err, threadId }, 'user.message turn failed to start');
           gateway.emitToThread(threadId, {
             type: 'turn.error',

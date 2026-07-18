@@ -39,6 +39,11 @@ const envSchema = z.object({
   CLERK_SECRET_KEY: z.string().optional(),
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
   APP_ORIGIN: z.url().optional(),
+  // Max USER turn starts per profile per local day; 0 = no quota (plans/08 §5).
+  DAILY_TURN_QUOTA: z.coerce.number().int().min(0).default(0),
+  // "1" enables @fastify/rate-limit (hosted deployments behind Caddy only —
+  // the limiter keys on X-Forwarded-For via trustProxy).
+  RATE_LIMITS: z.string().optional(),
   LOG_LEVEL: logLevelSchema.optional(),
 });
 
@@ -66,6 +71,10 @@ export interface AppConfig {
   appOrigin?: string;
   /** Web origins allowed by CORS (credentials mode). */
   corsOrigins: string[];
+  /** Max USER turn starts per profile per local day; 0 = quota off. */
+  dailyTurnQuota: number;
+  /** True when RATE_LIMITS=1 — registers @fastify/rate-limit (prod only). */
+  rateLimits: boolean;
   logLevel?: z.infer<typeof logLevelSchema>;
 }
 
@@ -112,6 +121,8 @@ export function loadConfig(env?: Record<string, string | undefined>): AppConfig 
       `http://127.0.0.1:${e.WEB_PORT}`,
       ...(e.APP_ORIGIN ? [e.APP_ORIGIN] : []),
     ],
+    dailyTurnQuota: e.DAILY_TURN_QUOTA,
+    rateLimits: e.RATE_LIMITS === '1',
     logLevel: e.LOG_LEVEL,
   };
 }
@@ -139,6 +150,8 @@ export function configSummary(config: AppConfig) {
     codexModel: config.codexModel,
     codexHome: config.codexHome,
     corsOrigins: config.corsOrigins,
+    dailyTurnQuota: config.dailyTurnQuota,
+    rateLimits: config.rateLimits,
     clerkSecretKeySet: config.clerkSecretKey !== undefined,
     clerkPublishableKeySet: config.clerkPublishableKey !== undefined,
     accessCodeSet: config.accessCode !== undefined,

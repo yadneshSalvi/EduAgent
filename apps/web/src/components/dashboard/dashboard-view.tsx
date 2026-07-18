@@ -46,12 +46,17 @@ function DashboardSkeleton() {
         </div>
         <div className="h-12 w-64 rounded-lg bg-surface-2" />
       </div>
-      <div className="grid gap-6 lg:grid-cols-12">
-        <div className="h-[420px] rounded-lg border bg-surface lg:col-span-4" />
-        <div className="h-[420px] rounded-lg border bg-surface lg:col-span-8" />
-        <div className="h-[340px] rounded-lg border bg-surface lg:col-span-7" />
-        <div className="h-[560px] rounded-lg border bg-surface lg:col-span-5 lg:row-span-2" />
-        <div className="h-[180px] rounded-lg border bg-surface lg:col-span-7" />
+      <div className="grid items-start gap-6 lg:grid-cols-12">
+        <div className="flex flex-col gap-6 lg:col-span-4">
+          <div className="h-[500px] rounded-lg border bg-surface" />
+          <div className="h-[500px] rounded-lg border bg-surface" />
+          <div className="h-[200px] rounded-lg border bg-surface" />
+        </div>
+        <div className="flex flex-col gap-6 lg:col-span-8">
+          <div className="h-[230px] rounded-lg border bg-surface" />
+          <div className="h-[380px] rounded-lg border bg-surface" />
+          <div className="h-[640px] rounded-lg border bg-surface" />
+        </div>
       </div>
     </div>
   );
@@ -101,7 +106,8 @@ function DashboardHeader({ data }: { data: DashboardData }) {
     <header className="flex flex-wrap items-end justify-between gap-6">
       <div className="flex min-w-0 flex-col gap-1">
         <h1 className="font-display text-h2 font-medium tracking-tight">
-          Welcome back, {data.user.displayName}
+          {/* "back" only once there's a history to come back to. */}
+          {data.timeline.length > 1 ? 'Welcome back' : 'Welcome'}, {data.user.displayName}
         </h1>
         <p className="flex items-center gap-2 text-body-sm text-muted-foreground">
           {data.user.streakDays > 0 ? (
@@ -181,6 +187,9 @@ export function DashboardView() {
     <div className="flex flex-col gap-6 p-8">
       <DashboardHeader data={data} />
 
+      {/* Two balanced columns at lg (both fill continuously — no grid holes):
+          readiness + activity in the narrow rail, heatmap → curves → a
+          fixed-height scrolling timeline in the wide one. */}
       <div className="grid items-start gap-6 lg:grid-cols-12">
         <div className="flex flex-col gap-6 lg:col-span-4">
           {data.readiness.map((readiness) => (
@@ -191,17 +200,14 @@ export function DashboardView() {
               conceptTopic={conceptTopic}
             />
           ))}
-        </div>
-        <div className="lg:col-span-8">
-          <MasteryHeatmap topics={data.topics} />
-        </div>
-
-        <div className="flex flex-col gap-6 lg:col-span-7">
-          <DecayChart decaySeries={data.decaySeries} today={today} />
           <ActivityStrip activity={data.activity} />
         </div>
-        <div className="max-h-[720px] lg:col-span-5">
-          <TimelineFeed timeline={data.timeline} />
+        <div className="flex flex-col gap-6 lg:col-span-8">
+          <MasteryHeatmap topics={data.topics} />
+          <DecayChart decaySeries={data.decaySeries} today={today} />
+          <div className="h-[640px]">
+            <TimelineFeed timeline={data.timeline} />
+          </div>
         </div>
       </div>
     </div>

@@ -17,7 +17,8 @@ const buttonVariants = cva(
       },
       size: {
         default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
+        // 05 §9: every hit target ≥40px — "sm" differs from default only in padding.
+        sm: 'h-10 rounded-md px-3',
         lg: 'h-11 rounded-md px-6 text-body',
         icon: 'size-10',
       },

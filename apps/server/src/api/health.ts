@@ -6,7 +6,9 @@ import type { FastifyPluginAsync } from 'fastify';
  * against ItemMirror while codex restarts (task #11 boot wiring).
  */
 export const healthRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/healthz', async (req, reply) => {
+  // rateLimit:false — the uptime pinger must never be throttled (plans/08 §5);
+  // inert when RATE_LIMITS is off (the plugin is not registered).
+  app.get('/healthz', { config: { rateLimit: false } }, async (req, reply) => {
     let codex = 'not started';
     if (app.codexHealth) {
       const probe = await app.codexHealth();

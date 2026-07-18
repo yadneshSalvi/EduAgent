@@ -46,7 +46,7 @@ import { cn } from '@/lib/utils';
  * product thesis — the diff this exam committed to your memory.
  */
 
-const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
+const MonacoEditor = dynamic(() => import('@/lib/monaco-react').then((m) => m.MonacoEditor), {
   ssr: false,
   loading: () => (
     <div className="flex h-full items-center justify-center bg-surface font-mono text-caption text-muted-foreground">
@@ -294,14 +294,14 @@ export function QuestionReview({ view }: { view: QuestionResultView }) {
         <div className="flex flex-col gap-4 border-t px-5 py-4">
           <Markdown content={view.question.prompt_md} className="text-body-sm" />
           <div className="flex flex-col gap-1.5">
-            <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+            <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
               your answer
             </p>
             <AnswerBlock view={view} />
           </div>
           {grade ? (
             <div className="flex flex-col gap-1.5 border-l-2 border-primary/50 pl-4">
-              <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+              <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
                 examiner&apos;s feedback
               </p>
               <Markdown content={grade.feedback_md} className="text-body-sm" />
@@ -354,7 +354,7 @@ function MemoryCommitLink({ exam }: { exam: ExamDto }) {
       aria-label="Memory commit"
       className="flex flex-wrap items-center gap-4 rounded-lg border bg-surface p-6"
     >
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-accent-soft text-primary">
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-accent-soft text-primary-legible">
         <GitCommitHorizontal className="size-5" aria-hidden />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">

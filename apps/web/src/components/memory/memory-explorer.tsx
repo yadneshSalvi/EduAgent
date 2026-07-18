@@ -38,7 +38,7 @@ import { TimeMachineSlider, type TimeMachineRange } from './time-machine-slider'
  * parsed commits in range. "Export my memory" downloads the repo as a zip.
  */
 const TYPE_BADGE: Record<MemoryCommitType, string> = {
-  learn: 'bg-accent-soft text-primary',
+  learn: 'bg-accent-soft text-primary-legible',
   review: 'bg-success/15 text-success',
   exam: 'bg-warn/15 text-warn',
   misconception: 'bg-danger/15 text-danger',
@@ -212,16 +212,16 @@ function RangeDiff({
         toDate={toDate}
       />
       {files.length > 1 ? (
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-2">
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-1.5">
           {files.map((file, index) => (
             <button
               key={file.path}
               type="button"
               onClick={() => setActiveIndex(index)}
               className={cn(
-                'shrink-0 rounded-sm px-2 py-1 font-mono text-caption transition-colors duration-150',
+                'flex h-10 shrink-0 items-center rounded-sm px-2.5 font-mono text-caption transition-colors duration-150',
                 index === activeIndex
-                  ? 'bg-accent-soft text-primary'
+                  ? 'bg-accent-soft text-primary-legible'
                   : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
               )}
             >

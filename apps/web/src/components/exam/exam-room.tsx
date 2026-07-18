@@ -38,7 +38,7 @@ import { QuestionPalette } from './question-palette';
  * the server sweep does; the room locks and observes.
  */
 
-const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
+const MonacoEditor = dynamic(() => import('@/lib/monaco-react').then((m) => m.MonacoEditor), {
   ssr: false,
   loading: () => (
     <div className="flex h-full items-center justify-center bg-surface font-mono text-caption text-muted-foreground">
@@ -199,7 +199,7 @@ function QuestionCard({
           title={flagged ? 'Unflag' : 'Flag for review'}
           onClick={onToggleFlag}
           className={cn(
-            'rounded-md p-1.5 transition-colors duration-150',
+            '-my-2 flex size-10 items-center justify-center rounded-md transition-colors duration-150',
             flagged
               ? 'bg-warn/15 text-warn'
               : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
@@ -526,7 +526,7 @@ export function ExamRoom({
         {questions.sections.map((section, sectionIndex) => (
           <section key={sectionIndex} aria-label={section.title} className="flex flex-col gap-4">
             <h2 className="flex items-baseline gap-3 border-b pb-2">
-              <span className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+              <span className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
                 section {sectionIndex + 1}
               </span>
               <span className="text-lead font-medium">{section.title}</span>

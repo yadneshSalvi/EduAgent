@@ -3,9 +3,12 @@
  * workspaces, memory pipeline, and WS gateway together per thread.
  */
 export {
+  DAILY_QUOTA_MESSAGE,
+  DailyTurnQuotaError,
   GREETING_INPUT,
   maskExamArtifacts,
   ThreadManager,
+  TURN_START_EVENT,
   type EnsureThreadResult,
   type ExamForkOptions,
   type ExamThreadService,

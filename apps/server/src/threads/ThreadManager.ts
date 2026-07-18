@@ -18,7 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { Prisma, PrismaClient, Thread } from '@prisma/client';
-import type { ThreadMode, WsEvent } from '@eduagent/shared';
+import { localDate, type ThreadMode, type WsEvent } from '@eduagent/shared';
 import type { AppServerClient, CodexLogger, ThreadEvent } from '../codex/index.js';
 import { parseExamConfig, type ExamTarget } from '../learning/exam-config.js';
 import {
@@ -104,6 +104,13 @@ export interface ThreadManagerDeps {
   logger?: CodexLogger;
   /** Fail-safe ceiling per turn (default 10 min) so a hung turn can't wedge the queue. */
   turnTimeoutMs?: number;
+  /**
+   * Max USER turn starts per profile per LOCAL day (the user's timezone);
+   * 0/absent = no quota. System turns (greeting, grading, kickoffs) are
+   * exempt — the quota protects API credits from chat volume, and a refused
+   * grading turn would strand submitted work (plans/08 §5).
+   */
+  dailyTurnQuota?: number;
 }
 
 type ItemCompletedEvent = Extract<ThreadEvent, { type: 'itemCompleted' }>;
@@ -147,6 +154,33 @@ export const EXAM_INJECT_PREAMBLE =
 
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * ActivityEvent.kind recording one USER turn start (quota bookkeeping only —
+ * written only while a quota is configured; the dashboard heatmap excludes it).
+ */
+export const TURN_START_EVENT = 'turn_start';
+
+/** Covers every UTC offset (±14h) when bucketing recent events by local day. */
+const QUOTA_LOOKBACK_MS = 26 * 3_600_000;
+
+/** What the chat shows when the day's allowance is used up — terminal, not a retry. */
+export const DAILY_QUOTA_MESSAGE =
+  "This profile has used today's turn allowance. It resets at midnight " +
+  '(profile local time) — everything learned so far is saved.';
+
+/**
+ * Thrown by startTurn when the profile's daily USER-turn quota is exhausted.
+ * The manager has already emitted the terminal turn.error to the sockets;
+ * REST initiators map this to a clean 429 via `statusCode`.
+ */
+export class DailyTurnQuotaError extends Error {
+  readonly statusCode = 429;
+  constructor(readonly quota: number) {
+    super(`daily turn quota reached (${quota} user turns per local day)`);
+    this.name = 'DailyTurnQuotaError';
+  }
+}
+
 /** Activity-chip label cap; the web settles chips by exact label match. */
 const ACTIVITY_LABEL_MAX = 80;
 /** Mirrored exec output cap — ItemMirror is a render cache, not a log store. */
@@ -179,6 +213,7 @@ export class ThreadManager implements ExamThreadService {
   private readonly sink: ThreadEventSink;
   private readonly log: CodexLogger;
   private readonly turnTimeoutMs: number;
+  private readonly dailyTurnQuota: number;
 
   /** codexThreadIds known to the CURRENT codex child (cleared on restart). */
   private readonly resumedThreads = new Set<string>();
@@ -212,6 +247,7 @@ export class ThreadManager implements ExamThreadService {
     this.sink = deps.sink;
     this.log = deps.logger ?? NOOP_LOGGER;
     this.turnTimeoutMs = deps.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
+    this.dailyTurnQuota = deps.dailyTurnQuota ?? 0;
   }
 
   /**
@@ -493,7 +529,10 @@ export class ThreadManager implements ExamThreadService {
    * `submitted` on (ExamService flips the status BEFORE invalidating, so the
    * rotation-triggered resume always sees the new phase).
    */
-  private async examInstructions(threadRowId: string | undefined, sessionToken: string): Promise<string> {
+  private async examInstructions(
+    threadRowId: string | undefined,
+    sessionToken: string,
+  ): Promise<string> {
     if (threadRowId === undefined) {
       throw new Error('exam instructions need the thread row id');
     }
@@ -582,9 +621,7 @@ export class ThreadManager implements ExamThreadService {
           {
             type: 'message',
             role: 'developer',
-            content: [
-              { type: 'input_text', text: EXAM_INJECT_PREAMBLE + developerInstructions },
-            ],
+            content: [{ type: 'input_text', text: EXAM_INJECT_PREAMBLE + developerInstructions }],
           },
         ],
       });
@@ -607,12 +644,62 @@ export class ThreadManager implements ExamThreadService {
     );
   }
 
+  /**
+   * Daily quota gate + bookkeeping for USER turns (plans/08 §5). Runs inside
+   * the per-user turn queue, so check-then-record is race-free. A refused
+   * turn leaves no trace (no mirror row, no lastActiveAt bump): the manager
+   * emits the terminal turn.error itself, then rejects with the typed error.
+   */
+  private async enforceDailyQuota(thread: Thread): Promise<void> {
+    if (this.dailyTurnQuota <= 0) return;
+    const user = await this.prisma.user.findUnique({
+      where: { id: thread.userId },
+      select: { timezone: true },
+    });
+    const timezone = user?.timezone ?? 'UTC';
+    const now = new Date();
+    const today = localDate(now, timezone);
+    // Same local-day bucketing as the dashboard: pull the recent window and
+    // compare calendar days in the user's timezone (cheap — quota-sized).
+    const recent = await this.prisma.activityEvent.findMany({
+      where: {
+        userId: thread.userId,
+        kind: TURN_START_EVENT,
+        at: { gte: new Date(now.getTime() - QUOTA_LOOKBACK_MS) },
+      },
+      select: { at: true },
+    });
+    const startsToday = recent.filter((event) => localDate(event.at, timezone) === today).length;
+    if (startsToday >= this.dailyTurnQuota) {
+      this.log.warn(
+        { threadId: thread.id, userId: thread.userId, quota: this.dailyTurnQuota },
+        'daily turn quota reached — refusing user turn',
+      );
+      this.emitTurnEvent(thread, {
+        type: 'turn.error',
+        threadId: thread.id,
+        message: DAILY_QUOTA_MESSAGE,
+        retryable: false,
+      });
+      throw new DailyTurnQuotaError(this.dailyTurnQuota);
+    }
+    // Recorded before dispatch: a start that later fails still spent a start.
+    await this.prisma.activityEvent.create({
+      data: {
+        userId: thread.userId,
+        kind: TURN_START_EVENT,
+        meta: { threadId: thread.id, mode: thread.mode },
+      },
+    });
+  }
+
   private async runTurn(
     thread: Thread,
     text: string,
     role: 'user' | 'system',
     caption: string | null = null,
   ): Promise<void> {
+    if (role === 'user') await this.enforceDailyQuota(thread);
     await this.ensureResumed(thread);
 
     const model = await this.workspaces.readLearnerModel(thread.userId);
@@ -745,7 +832,10 @@ export class ThreadManager implements ExamThreadService {
       try {
         this.handleThreadEvent(thread, event);
       } catch (err) {
-        this.log.error({ err, threadId: thread.id, type: event.type }, 'thread event handler threw');
+        this.log.error(
+          { err, threadId: thread.id, type: event.type },
+          'thread event handler threw',
+        );
       }
     });
     this.subscriptions.set(thread.codexThreadId, unsubscribe);
@@ -912,7 +1002,10 @@ export class ThreadManager implements ExamThreadService {
  * SAME masked label is what the exam exec ItemMirror row carries, so no
  * surface ever shows more than the live chip did.
  */
-function activityFor(item: CodexItem, exam = false): { kind: 'exec' | 'tool'; label: string } | null {
+function activityFor(
+  item: CodexItem,
+  exam = false,
+): { kind: 'exec' | 'tool'; label: string } | null {
   switch (item.type) {
     case 'commandExecution':
       return {

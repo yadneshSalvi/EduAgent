@@ -14,6 +14,8 @@ export default tseslint.config(
       'data/**',
       'plans/**',
       'docs/**',
+      // Vendored monaco AMD bundle (apps/web/scripts/vendor-monaco.mjs).
+      'apps/web/public/monaco/**',
       // Phase 0 spike harness + captured fixtures are owned by the protocol
       // spike task and intentionally not held to lint rules.
       'scripts/spike-appserver.mjs',

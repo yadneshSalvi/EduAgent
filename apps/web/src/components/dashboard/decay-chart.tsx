@@ -32,7 +32,10 @@ const SERIES_COLORS = ['#7C6AEF', '#3ECF8E', '#2F6F8F', '#2E9E7A', '#8B93A7', '#
 const CHART_HEIGHT = 260;
 /** Approximate plot height for end-label collision nudging. */
 const PLOT_HEIGHT = CHART_HEIGHT - 12 - 24 - 26;
-const LABEL_MIN_GAP = 15;
+const LABEL_MIN_GAP = 17;
+/** Labels may hang slightly below the plot, never into the axis dates. */
+const LABEL_MAX_Y = PLOT_HEIGHT + 6;
+const LABEL_MAX_CHARS = 20;
 
 interface EndLabel {
   concept: string;
@@ -60,14 +63,25 @@ function layoutEndLabels(
     return { concept, name, value };
   });
   finals.sort((a, b) => b.value - a.value);
-  const labels = new Map<string, EndLabel>();
+  // Forward pass pushes overlapping labels down; the backward pass then
+  // clamps the stack to the plot bottom so low-value series never collide
+  // with each other or the axis dates.
+  const ys: number[] = [];
   let lastY = -Infinity;
-  for (const { concept, name, value } of finals) {
+  for (const { value } of finals) {
     const naturalY = (1 - value) * PLOT_HEIGHT;
-    const y = Math.max(naturalY, lastY + LABEL_MIN_GAP);
-    lastY = y;
-    labels.set(concept, { concept, name, color: colorOf(concept), dy: y - naturalY });
+    lastY = Math.max(naturalY, lastY + LABEL_MIN_GAP);
+    ys.push(lastY);
   }
+  for (let i = finals.length - 1; i >= 0; i--) {
+    const cap = i === finals.length - 1 ? LABEL_MAX_Y : ys[i + 1]! - LABEL_MIN_GAP;
+    if (ys[i]! > cap) ys[i] = cap;
+  }
+  const labels = new Map<string, EndLabel>();
+  finals.forEach(({ concept, name, value }, i) => {
+    const naturalY = (1 - value) * PLOT_HEIGHT;
+    labels.set(concept, { concept, name, color: colorOf(concept), dy: ys[i]! - naturalY });
+  });
   return labels;
 }
 
@@ -171,7 +185,7 @@ export function DecayChart({
 
       <div style={{ height: CHART_HEIGHT }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={{ top: 12, right: 108, bottom: 0, left: -18 }}>
+          <LineChart data={rows} margin={{ top: 12, right: 128, bottom: 0, left: -18 }}>
             <CartesianGrid stroke="var(--border)" vertical={false} />
             <XAxis
               dataKey="date"
@@ -261,7 +275,7 @@ export function DecayChart({
                         fill={color}
                         className="font-sans"
                       >
-                        {name}
+                        {name.length > LABEL_MAX_CHARS ? `${name.slice(0, LABEL_MAX_CHARS - 1)}…` : name}
                       </text>
                     );
                   }}

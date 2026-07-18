@@ -92,7 +92,7 @@ export function ChatInput({
                 onInterrupt();
               }
             }}
-            className="max-h-[180px] flex-1 resize-none bg-transparent text-body outline-none placeholder:text-muted-foreground/70 focus-visible:outline-none"
+            className="max-h-[180px] flex-1 resize-none bg-transparent text-body outline-none placeholder:text-muted-foreground focus-visible:outline-none"
           />
           <button
             type="button"
@@ -100,7 +100,7 @@ export function ChatInput({
             disabled={text.trim() === '' || disconnected}
             aria-label="Send message (⌘↵)"
             className={cn(
-              'flex size-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150',
+              'flex size-10 shrink-0 items-center justify-center rounded-full transition-colors duration-150',
               text.trim() !== '' && !disconnected
                 ? 'bg-primary text-primary-foreground hover:opacity-90'
                 : 'bg-surface-2 text-muted-foreground',
@@ -109,7 +109,7 @@ export function ChatInput({
             <ArrowUp className="size-4" aria-hidden />
           </button>
         </div>
-        <div className="flex items-center justify-between px-1 font-mono text-caption text-muted-foreground/80">
+        <div className="flex items-center justify-between px-1 font-mono text-caption text-muted-foreground">
           <span aria-live="polite">
             {connection === 'reconnecting' ? (
               <span className="flex items-center gap-1.5 text-warn">

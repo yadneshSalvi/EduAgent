@@ -8,11 +8,13 @@ import {
   GraduationCap,
   LayoutDashboard,
   RotateCcw,
+  Search,
   Timer,
   UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { useCommandPalette } from '@/components/shared/command-palette';
 import { useDashboard } from '@/hooks/use-dashboard';
 import { useMe } from '@/hooks/use-me';
 import { cn } from '@/lib/utils';
@@ -32,6 +34,25 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Memory', href: '/app/memory', icon: GitCommitHorizontal },
 ];
 
+/**
+ * Hover/focus intent warms the heavy dynamic chunks behind each route
+ * (plans/04 §12) — Link already prefetches the routes themselves. Monaco's
+ * editor assets load on mount from /monaco/vs; this pulls the react wrapper
+ * chunk so the editor shell is ready the moment the room opens.
+ */
+const CHUNK_PREFETCH: Record<string, () => void> = {
+  '/app': () => void import('@/components/dashboard/decay-chart'),
+  '/app/learn': () => void import('@/lib/monaco-react'),
+  '/app/exam': () => void import('@/lib/monaco-react'),
+  '/app/memory': () => void import('@/lib/monaco-react'),
+};
+const prefetched = new Set<string>();
+function warmChunks(href: string): void {
+  if (prefetched.has(href)) return;
+  prefetched.add(href);
+  CHUNK_PREFETCH[href]?.();
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   // Live due count + streak ride the shared dashboard query (invalidated on
@@ -44,7 +65,13 @@ export function AppSidebar() {
   return (
     <aside className="sticky top-0 flex h-dvh w-16 shrink-0 flex-col border-r bg-surface lg:w-60">
       <div className="flex h-16 items-center justify-center border-b px-2 lg:justify-start lg:px-6">
-        <Link href="/app" className="rounded-sm font-display text-h4 font-semibold tracking-tight">
+        <Link
+          href="/app"
+          // Below lg only the aria-hidden "E" is visible — the label carries
+          // the accessible name at every width.
+          aria-label="EduAgent — dashboard"
+          className="flex h-10 items-center rounded-sm font-display text-h4 font-semibold tracking-tight"
+>
           <span className="lg:hidden" aria-hidden>
             E
           </span>
@@ -65,10 +92,12 @@ export function AppSidebar() {
               href={item.href}
               aria-current={active ? 'page' : undefined}
               title={item.label}
+              onMouseEnter={() => warmChunks(item.href)}
+              onFocus={() => warmChunks(item.href)}
               className={cn(
                 'flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium transition-colors duration-150 lg:justify-start lg:px-3',
                 active
-                  ? 'bg-accent-soft text-primary'
+                  ? 'bg-accent-soft text-primary-legible'
                   : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
               )}
             >
@@ -88,8 +117,34 @@ export function AppSidebar() {
         })}
       </nav>
 
+      <PaletteHint />
       <UserChip streakDays={dashboard?.user.streakDays ?? 0} />
     </aside>
+  );
+}
+
+/** Advertises the ⌘K layer (plans/04 §11) — judges are developers. */
+function PaletteHint() {
+  const palette = useCommandPalette();
+  if (!palette) return null;
+  return (
+    <div className="px-2 pb-1 lg:px-3">
+      <button
+        type="button"
+        onClick={palette.open}
+        title="Command palette"
+        className="flex h-10 w-full items-center justify-center gap-3 rounded-md text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground lg:justify-start lg:px-3"
+      >
+        <Search className="size-4.5 shrink-0" aria-hidden />
+        <span className="hidden flex-1 text-left text-body-sm font-medium lg:inline">Commands</span>
+        <kbd
+          aria-hidden
+          className="hidden rounded-sm border bg-surface-2 px-1.5 py-0.5 font-mono text-caption lg:inline"
+        >
+          ⌘K
+        </kbd>
+      </button>
+    </div>
   );
 }
 
@@ -113,7 +168,7 @@ function UserChip({ streakDays }: { streakDays: number }) {
           className={cn(
             'flex size-8 shrink-0 items-center justify-center rounded-full',
             name
-              ? 'bg-accent-soft text-body-sm font-semibold text-primary'
+              ? 'bg-accent-soft text-body-sm font-semibold text-primary-legible'
               : 'bg-surface-2 text-muted-foreground',
           )}
         >

@@ -37,6 +37,7 @@ import {
   type MasteryFile,
   type TimelineEntry,
 } from '@eduagent/shared';
+import { TURN_START_EVENT } from '../threads/index.js';
 import type { GitService, GitCommitInfo } from '../workspace/GitService.js';
 import { parseCommit } from '../workspace/GitService.js';
 import type { LearnerModel, WorkspaceLogger, WorkspaceManager } from '../workspace/index.js';
@@ -202,7 +203,13 @@ export class DashboardService {
 
       let baseline = 0;
       if (baselineSha !== null) {
-        baseline = await this.baselineReadiness(git, baselineSha, track.track, baselineMastery, cutoff);
+        baseline = await this.baselineReadiness(
+          git,
+          baselineSha,
+          track.track,
+          baselineMastery,
+          cutoff,
+        );
       }
 
       // "Weakest" per plans/02 §4: bottom 5 by WEIGHTED effective mastery —
@@ -241,7 +248,12 @@ export class DashboardService {
     for (const item of track.items) {
       let mastery = masteryCache.get(item.topic);
       if (mastery === undefined) {
-        mastery = await this.fileAt(git, sha, `topics/${item.topic}/mastery.yaml`, masteryFileSchema);
+        mastery = await this.fileAt(
+          git,
+          sha,
+          `topics/${item.topic}/mastery.yaml`,
+          masteryFileSchema,
+        );
         masteryCache.set(item.topic, mastery);
       }
       const concept = mastery?.concepts.find((c) => c.id === item.concept);
@@ -280,7 +292,13 @@ export class DashboardService {
     now: Date,
   ): Promise<DashboardData['activity']> {
     const events = await this.prisma.activityEvent.findMany({
-      where: { userId, at: { gte: new Date(now.getTime() - (ACTIVITY_DAYS + 1) * MS_PER_DAY) } },
+      // turn_start rows are quota bookkeeping (ThreadManager) — counting them
+      // here would roughly double the heatmap on hosted days vs. seeded ones.
+      where: {
+        userId,
+        kind: { not: TURN_START_EVENT },
+        at: { gte: new Date(now.getTime() - (ACTIVITY_DAYS + 1) * MS_PER_DAY) },
+      },
       select: { at: true },
     });
     const counts = new Map<string, number>();
@@ -320,7 +338,12 @@ function indexConcepts(model: LearnerModel, now: Date): ConceptIndex {
       index.set(`${topic.topic}/${concept.id}`, {
         name: concept.name,
         mastery: concept.mastery,
-        effective: effectiveMastery(concept.mastery, concept.review_count, concept.last_assessed, now),
+        effective: effectiveMastery(
+          concept.mastery,
+          concept.review_count,
+          concept.last_assessed,
+          now,
+        ),
         reviewCount: concept.review_count,
         lastAssessed: concept.last_assessed,
       });

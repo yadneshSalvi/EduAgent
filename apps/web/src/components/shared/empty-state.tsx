@@ -57,7 +57,7 @@ export function EmptyState({
         className,
       )}
     >
-      <div className="flex size-12 items-center justify-center rounded-md bg-accent-soft text-primary">
+      <div className="flex size-12 items-center justify-center rounded-md bg-accent-soft text-primary-legible">
         <Icon className="size-6" aria-hidden />
       </div>
       <div className="flex flex-col gap-2">
@@ -75,7 +75,7 @@ export function EmptyState({
           {secondaryCta ? <CtaButton cta={{ variant: 'outline', ...secondaryCta }} /> : null}
         </div>
       ) : null}
-      {hint ? <p className="text-caption text-muted-foreground/80">{hint}</p> : null}
+      {hint ? <p className="text-caption text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

@@ -32,8 +32,15 @@ export type ApiError = z.infer<typeof apiErrorSchema>;
 export const demoLoginRequestSchema = z.object({ accessCode: z.string().min(1) });
 export type DemoLoginRequest = z.infer<typeof demoLoginRequestSchema>;
 
-/** Response: a Clerk sign-in token the web app consumes. */
-export const demoLoginResponseSchema = z.object({ token: z.string().min(1) });
+/**
+ * Response: a Clerk sign-in token the web consumes via
+ * `signIn.create({ strategy: 'ticket', ticket: token })`; `userId` is the
+ * CLERK user id the token signs in (the standing demo identity).
+ */
+export const demoLoginResponseSchema = z.object({
+  token: z.string().min(1),
+  userId: z.string().min(1),
+});
 export type DemoLoginResponse = z.infer<typeof demoLoginResponseSchema>;
 
 /** POST /auth/local-login — AUTH_MODE=local only: create-or-login profile. */

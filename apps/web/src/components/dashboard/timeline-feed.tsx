@@ -22,7 +22,7 @@ const PAGE_SIZE = 50;
 export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 const TYPE_BADGE: Record<MemoryCommitType, string> = {
-  learn: 'bg-accent-soft text-primary',
+  learn: 'bg-accent-soft text-primary-legible',
   review: 'bg-success/15 text-success',
   exam: 'bg-warn/15 text-warn',
   misconception: 'bg-danger/15 text-danger',
@@ -86,7 +86,9 @@ function TimelineRow({
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
-        className="group flex w-full items-start gap-2.5 text-left"
+        // -my-3 grows the hit box into the li's own py-3 (05 §9 ≥40px) —
+        // no background, so the visual row is unchanged.
+        className="group -my-3 flex w-full items-start gap-2.5 py-3 text-left"
       >
         <span
           className={cn(
@@ -189,7 +191,7 @@ export function TimelineFeed({ timeline }: { timeline: TimelineEntry[] }) {
   };
 
   return (
-    <section aria-label="Memory timeline" className="flex min-h-0 flex-col gap-4 rounded-lg border bg-surface p-6">
+    <section aria-label="Memory timeline" className="flex h-full min-h-0 flex-col gap-4 rounded-lg border bg-surface p-6">
       <header className="flex items-baseline justify-between gap-3">
         <h2 className="text-lead font-medium">Memory timeline</h2>
         <p className="font-mono text-caption text-muted-foreground">
@@ -213,7 +215,8 @@ export function TimelineFeed({ timeline }: { timeline: TimelineEntry[] }) {
         <Button
           size="sm"
           variant="ghost"
-          className="gap-1.5 self-center text-muted-foreground"
+          // shrink-0: the column flex parent would squeeze h-10 to ~22px.
+          className="shrink-0 gap-1.5 self-center text-muted-foreground"
           disabled={loadingMore}
           onClick={() => void loadMore()}
         >

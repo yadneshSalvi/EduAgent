@@ -4,12 +4,26 @@ import type { FastifyPluginAsync } from 'fastify';
 import {
   demoLoginRequestSchema,
   localLoginRequestSchema,
+  type DemoLoginResponse,
   type LocalUsersResponse,
   type MeResponse,
 } from '@eduagent/shared';
-import { LOCAL_SESSION_COOKIE } from '../auth/index.js';
+import { createDemoClerkClient, LOCAL_SESSION_COOKIE } from '../auth/index.js';
 import { workspacePathFor } from '../config.js';
 import { constantTimeEqual, sendError } from './http.js';
+
+/** The seeded demo profile demo-login signs judges into (plans/08 §6). */
+export const DEMO_HANDLE = 'alex';
+/** Sign-in token TTL — long enough to paste-and-click, short enough to leak safely. */
+export const DEMO_TOKEN_TTL_SECONDS = 600;
+
+/**
+ * Tight per-IP bucket for the CREDENTIAL routes (access-code / handle login):
+ * brute-force protection under RATE_LIMITS=1, inert otherwise. Deliberately
+ * NOT on /auth/me — the web checks the session on every mount, so 10/min
+ * there would 429 normal navigation.
+ */
+const AUTH_RATE_LIMIT = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
 /** The /auth/* routes (plans/03 §7) — the only routes outside resolveUser auth. */
 export const authRoutes: FastifyPluginAsync = async (app) => {
@@ -29,7 +43,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return app.workspaces.hasCommittedProfile(userId);
   }
 
-  app.post('/auth/local-login', async (req, reply) => {
+  app.post('/auth/local-login', AUTH_RATE_LIMIT, async (req, reply) => {
     if (config.authMode !== 'local') {
       return sendError(
         reply,
@@ -82,7 +96,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return response;
   });
 
-  app.post('/auth/demo-login', async (req, reply) => {
+  app.post('/auth/demo-login', AUTH_RATE_LIMIT, async (req, reply) => {
     if (config.authMode !== 'clerk') {
       return sendError(
         reply,
@@ -108,17 +122,84 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!constantTimeEqual(parsed.data.accessCode, config.accessCode)) {
       return sendError(reply, 403, 'forbidden', 'Invalid access code.');
     }
-    // Phase 5: create/link a Clerk user for the seeded "alex" row and return a
-    // Clerk sign-in token (plans/03 §7). Until the seeder exists there is no
-    // alex row to link, so this endpoint is a stub.
-    return sendError(
-      reply,
-      501,
-      'not_implemented',
-      'Demo login activates in Phase 5, once the seeded "alex" user exists. ' +
-        'It will then mint a Clerk sign-in token for that account.',
-    );
+
+    const alex = await prisma.user.findUnique({ where: { handle: DEMO_HANDLE } });
+    if (!alex) {
+      return sendError(
+        reply,
+        404,
+        'no_demo_user',
+        `The seeded "${DEMO_HANDLE}" profile does not exist — run \`pnpm seed\` first.`,
+      );
+    }
+
+    try {
+      const clerkUserId = alex.authId ?? (await ensureClerkLink(alex.id));
+      const minted = await demoClerk().createSignInToken({
+        userId: clerkUserId,
+        expiresInSeconds: DEMO_TOKEN_TTL_SECONDS,
+      });
+      req.log.info({ userId: alex.id, clerkUserId }, 'demo-login minted sign-in token');
+      const response: DemoLoginResponse = { token: minted.token, userId: clerkUserId };
+      return response;
+    } catch (err) {
+      req.log.error({ err, userId: alex.id }, 'demo-login: Clerk API call failed');
+      return sendError(
+        reply,
+        502,
+        'clerk_unavailable',
+        'Clerk did not accept the sign-in token request. Try again in a moment.',
+      );
+    }
   });
+
+  /** Lazily built so tests can inject a fake and local mode never touches Clerk. */
+  function demoClerk() {
+    if (app.demoClerk) return app.demoClerk;
+    if (!config.clerkSecretKey) {
+      // Unreachable behind the authMode gate (clerk mode refuses to boot
+      // without the key) — kept as a guard for direct handler tests.
+      throw new Error('demo-login needs CLERK_SECRET_KEY');
+    }
+    return createDemoClerkClient(config.clerkSecretKey);
+  }
+
+  /**
+   * First demo-login ever: create the Clerk user for the seeded row and link
+   * it (User.authId). Serialized in-process, and the DB write is conditional
+   * on authId still being null — a concurrent writer's link wins and our
+   * freshly created Clerk user is simply never referenced again. Returns the
+   * linked Clerk user id.
+   */
+  let pendingLink: Promise<string> | null = null;
+  function ensureClerkLink(alexRowId: string): Promise<string> {
+    pendingLink ??= linkDemoUser(alexRowId).finally(() => {
+      pendingLink = null;
+    });
+    return pendingLink;
+  }
+
+  async function linkDemoUser(alexRowId: string): Promise<string> {
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: alexRowId } });
+    if (row.authId) return row.authId;
+    // A fresh/reseeded DATABASE against a Clerk instance that already has the
+    // standing demo user (unique demo email) must relink, not re-create.
+    const clerk = demoClerk();
+    const created =
+      (await clerk.findDemoUser({ handle: row.handle })) ??
+      (await clerk.createDemoUser({ handle: row.handle, displayName: row.displayName }));
+    const linked = await prisma.user.updateMany({
+      where: { id: row.id, authId: null },
+      data: { authId: created.id },
+    });
+    if (linked.count === 0) {
+      const raced = await prisma.user.findUniqueOrThrow({ where: { id: row.id } });
+      if (raced.authId) return raced.authId;
+      throw new Error(`could not link Clerk user ${created.id} to demo row ${row.id}`);
+    }
+    app.log.info({ userId: row.id, clerkUserId: created.id }, 'demo user linked to new Clerk user');
+    return created.id;
+  }
 };
 
 function toMeResponse(user: User, onboarded: boolean): MeResponse {

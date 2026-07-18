@@ -18,7 +18,7 @@ import { VerdictBanner } from './verdict-banner';
  * never loses work. ⌘↵ submits from inside the editor; grading locks the
  * editor until the verdict lands (fail → "Try again" re-enables it).
  */
-const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
+const MonacoEditor = dynamic(() => import('@/lib/monaco-react').then((m) => m.MonacoEditor), {
   ssr: false,
   loading: () => (
     <div className="flex h-full items-center justify-center bg-surface font-mono text-caption text-muted-foreground">

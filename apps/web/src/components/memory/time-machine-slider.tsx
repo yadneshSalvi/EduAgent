@@ -48,7 +48,8 @@ export function TimeMachineSlider({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="relative h-8">
+      {/* h-10: the strip is the sliders' hit surface (05 §9). */}
+      <div className="relative h-10">
         {/* Track + selected span */}
         <div className="absolute inset-x-2 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-border" />
         <div className="absolute inset-x-2 top-1/2 h-0.5 -translate-y-1/2">

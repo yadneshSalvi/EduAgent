@@ -6,6 +6,8 @@ import {
   createThreadRequestSchema,
   createThreadResponseSchema,
   dashboardDataSchema,
+  demoLoginRequestSchema,
+  demoLoginResponseSchema,
   examDtoSchema,
   exerciseDtoSchema,
   listExamsResponseSchema,
@@ -31,6 +33,8 @@ import {
   type CreateThreadRequest,
   type CreateThreadResponse,
   type DashboardData,
+  type DemoLoginRequest,
+  type DemoLoginResponse,
   type ExamAnswers,
   type ExamDto,
   type ExerciseDto,
@@ -215,6 +219,20 @@ export async function localLogin(request: LocalLoginRequest): Promise<MeResponse
 /** AUTH_MODE=local only — existing profiles for the login picker (404 in clerk mode). */
 export function listLocalUsers(signal?: AbortSignal): Promise<LocalUsersResponse> {
   return apiFetch('/auth/local-users', { schema: localUsersResponseSchema, signal });
+}
+
+/**
+ * Hosted demo, clerk mode only (plans/08 §6): access code → Clerk sign-in
+ * token for the seeded alex profile. The caller consumes the token via
+ * `signIn.create({ strategy: 'ticket' })` — session cookies are Clerk's,
+ * so markSessionEstablished() happens there, after setActive.
+ */
+export function demoLogin(request: DemoLoginRequest): Promise<DemoLoginResponse> {
+  return apiFetch('/auth/demo-login', {
+    method: 'POST',
+    body: demoLoginRequestSchema.parse(request),
+    schema: demoLoginResponseSchema,
+  });
 }
 
 export function listThreads(mode?: ThreadMode, signal?: AbortSignal): Promise<ListThreadsResponse> {

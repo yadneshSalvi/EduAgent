@@ -146,7 +146,7 @@ export function LearnPicker() {
                   'hover:border-primary/50 disabled:opacity-60',
                 )}
               >
-                <span className="flex size-10 items-center justify-center rounded-md bg-accent-soft text-primary">
+                <span className="flex size-10 items-center justify-center rounded-md bg-accent-soft text-primary-legible">
                   {busy ? (
                     <Loader2 className="size-5 animate-spin" aria-hidden />
                   ) : (
@@ -168,7 +168,7 @@ export function LearnPicker() {
             );
           })}
         </div>
-        <p className="text-caption text-muted-foreground/80">
+        <p className="text-caption text-muted-foreground">
           Any topic works once you&apos;re in the room — just tell the tutor what you want to
           learn.
         </p>

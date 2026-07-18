@@ -79,6 +79,7 @@ describe('reviewSessionReducer', () => {
     stats = reviewSessionReducer(stats, { type: 'quiz-pushed', quiz: QUIZ });
     stats = reviewSessionReducer(stats, {
       type: 'quiz-graded',
+      quizId: 'quiz-1',
       results: [
         { question_id: 'q1', verdict: 'correct', feedback_md: '' },
         { question_id: 'q2', verdict: 'partial', feedback_md: 'close' },
@@ -98,6 +99,67 @@ describe('reviewSessionReducer', () => {
     expect(stats.concepts).toEqual(['inner-join', 'where-clause', 'left-join']);
     expect(stats.commits).toBe(1);
     expect(stats.nextReviews).toEqual([{ concept: 'inner-join', days: 7 }]);
+  });
+
+  it('counts client-checked verdicts at submit; server results overwrite per question', () => {
+    let stats = initialReviewSessionStats;
+    stats = reviewSessionReducer(stats, { type: 'quiz-pushed', quiz: QUIZ });
+    // Submit: mcq q1 client-checked incorrect, short q2 carries no verdict.
+    stats = reviewSessionReducer(stats, {
+      type: 'answers-submitted',
+      quizId: 'quiz-1',
+      answers: [
+        { question_id: 'q1', answer: 'b', verdict: 'incorrect' },
+        { question_id: 'q2', answer: 'because…' },
+      ],
+    });
+    expect(stats.correct).toBe(0);
+    expect(stats.incorrect).toBe(1);
+    expect(stats.quizzesGraded).toBe(0);
+
+    // Server grades the short answer AND re-reports q1 — q1 must not double-count.
+    stats = reviewSessionReducer(stats, {
+      type: 'quiz-graded',
+      quizId: 'quiz-1',
+      results: [
+        { question_id: 'q1', verdict: 'incorrect', feedback_md: '' },
+        { question_id: 'q2', verdict: 'correct', feedback_md: 'yes' },
+      ],
+    });
+    expect(stats.quizzesGraded).toBe(1);
+    expect(stats.correct).toBe(1);
+    expect(stats.partial).toBe(0);
+    expect(stats.incorrect).toBe(1);
+  });
+
+  it('keeps client verdicts for questions the server never graded', () => {
+    let stats = initialReviewSessionStats;
+    stats = reviewSessionReducer(stats, {
+      type: 'answers-submitted',
+      quizId: 'quiz-1',
+      answers: [
+        { question_id: 'q1', answer: 'a', verdict: 'correct' },
+        { question_id: 'q2', answer: 'because…' },
+      ],
+    });
+    // Agent grades only the short answer (min(1) results — the common case).
+    stats = reviewSessionReducer(stats, {
+      type: 'quiz-graded',
+      quizId: 'quiz-1',
+      results: [{ question_id: 'q2', verdict: 'partial', feedback_md: 'close' }],
+    });
+    expect(stats.correct).toBe(1);
+    expect(stats.partial).toBe(1);
+    expect(stats.incorrect).toBe(0);
+
+    // A resubmit of the same answers (failed POST retry) changes nothing.
+    stats = reviewSessionReducer(stats, {
+      type: 'answers-submitted',
+      quizId: 'quiz-1',
+      answers: [{ question_id: 'q1', answer: 'a', verdict: 'correct' }],
+    });
+    expect(stats.correct).toBe(1);
+    expect(stats.partial).toBe(1);
   });
 
   it('later reschedules for the same concept replace earlier ones', () => {

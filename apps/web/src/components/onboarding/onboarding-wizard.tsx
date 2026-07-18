@@ -58,7 +58,7 @@ function StepChips({ current }: { current: number }) {
           className={cn(
             'flex items-center gap-1.5 rounded-sm border px-2.5 py-1 text-caption font-medium',
             index === current
-              ? 'border-transparent bg-accent-soft text-primary'
+              ? 'border-transparent bg-accent-soft text-primary-legible'
               : index < current
                 ? 'border-transparent text-success'
                 : 'text-muted-foreground',
@@ -116,7 +116,7 @@ function MemoryBornFinale({
           className="w-full rounded-lg border bg-surface p-4 text-left transition-colors duration-150 hover:border-primary/50"
         >
           <div className="flex items-center gap-2">
-            <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 font-mono text-caption text-primary">
+            <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 font-mono text-caption text-primary-legible">
               {commitBadge(commit)}
             </span>
             <span className="flex items-center gap-1 font-mono text-caption text-muted-foreground">

@@ -154,7 +154,7 @@ export function ReadinessGauge({
 
       {readiness.weakest.length > 0 ? (
         <div className="flex flex-col gap-2">
-          <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+          <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
             weakest concepts
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -165,7 +165,9 @@ export function ReadinessGauge({
                 disabled={busyConcept !== null}
                 onClick={() => void startLearn(concept)}
                 title={`Start a learn session on ${name} (effective ${formatMastery(effective)})`}
-                className="group inline-flex items-center gap-1.5 rounded-sm border bg-surface-2/60 px-2 py-1 font-mono text-caption transition-colors duration-150 hover:border-primary/50 hover:text-foreground disabled:opacity-60"
+                // before: extends the hit box to ≥40px (05 §9) past the 30px
+                // visible chip without inflating the bordered box itself.
+                className="group relative inline-flex items-center gap-1.5 rounded-sm border bg-surface-2/60 px-2 py-1.5 font-mono text-caption transition-colors duration-150 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] hover:border-primary/50 hover:text-foreground disabled:opacity-60"
               >
                 {busyConcept === concept ? (
                   <Loader2 className="size-3 animate-spin text-primary" aria-hidden />

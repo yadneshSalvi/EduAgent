@@ -8,7 +8,7 @@ import { MONACO_FONT_FAMILY, defineEduAgentTheme } from '@/lib/monaco-theme';
  * One file rendered in the Monaco DiffEditor, inline mode, our theme —
  * shared by the Diff Drawer and the memory explorer's time machine.
  */
-const MonacoDiff = dynamic(() => import('@monaco-editor/react').then((m) => m.DiffEditor), {
+const MonacoDiff = dynamic(() => import('@/lib/monaco-react').then((m) => m.DiffEditor), {
   ssr: false,
   loading: () => (
     <div className="flex h-full items-center justify-center font-mono text-caption text-muted-foreground">

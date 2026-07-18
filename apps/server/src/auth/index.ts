@@ -12,4 +12,6 @@ export function createAuthProvider(config: AppConfig, prisma: PrismaClient): Aut
 }
 
 export { LOCAL_SESSION_COOKIE } from './local.js';
+export { createDemoClerkClient } from './demo-clerk.js';
+export type { DemoClerkClient } from './demo-clerk.js';
 export type { AuthedUser, AuthProvider } from './types.js';

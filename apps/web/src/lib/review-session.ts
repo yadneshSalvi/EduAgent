@@ -1,4 +1,10 @@
-import type { MemoryCommit, QuizGradeResult, QuizPayload } from '@eduagent/shared';
+import type {
+  GradeVerdict,
+  MemoryCommit,
+  QuizGradeResult,
+  QuizPayload,
+  SubmitQuizRequest,
+} from '@eduagent/shared';
 import { daysUntil } from './dashboard-data';
 
 /**
@@ -64,6 +70,14 @@ export interface ReviewSessionStats {
   nextReviews: NextReview[];
   /** Commits landed during the session. */
   commits: number;
+  /**
+   * Per-question verdicts keyed `${quizId}:${questionId}` — client-checked
+   * mcq/predict verdicts land at submit time, server results overwrite on
+   * quiz.graded. correct/partial/incorrect above are always derived from the
+   * merged map, so a question is never counted twice.
+   */
+  clientVerdicts: Record<string, GradeVerdict>;
+  serverVerdicts: Record<string, GradeVerdict>;
 }
 
 export const initialReviewSessionStats: ReviewSessionStats = {
@@ -75,16 +89,33 @@ export const initialReviewSessionStats: ReviewSessionStats = {
   concepts: [],
   nextReviews: [],
   commits: 0,
+  clientVerdicts: {},
+  serverVerdicts: {},
 };
 
 export type ReviewSessionEvent =
   | { type: 'quiz-pushed'; quiz: QuizPayload }
-  | { type: 'quiz-graded'; results: QuizGradeResult[] }
+  | { type: 'answers-submitted'; quizId: string; answers: SubmitQuizRequest['answers'] }
+  | { type: 'quiz-graded'; quizId: string; results: QuizGradeResult[] }
   | { type: 'commit'; commit: MemoryCommit; todayIso: string };
 
 /** Quiz concept refs may be "topic/concept" — stats read as bare concepts. */
 const bareConcept = (ref: string): string =>
   ref.includes('/') ? ref.slice(ref.indexOf('/') + 1) : ref;
+
+/** Server verdicts win over the client check for the same question. */
+function withVerdictCounts(stats: ReviewSessionStats): ReviewSessionStats {
+  const merged = { ...stats.clientVerdicts, ...stats.serverVerdicts };
+  let correct = 0;
+  let partial = 0;
+  let incorrect = 0;
+  for (const verdict of Object.values(merged)) {
+    if (verdict === 'correct') correct++;
+    else if (verdict === 'partial') partial++;
+    else incorrect++;
+  }
+  return { ...stats, correct, partial, incorrect };
+}
 
 export function reviewSessionReducer(
   stats: ReviewSessionStats,
@@ -99,14 +130,23 @@ export function reviewSessionReducer(
       }
       return { ...stats, quizzesPushed: stats.quizzesPushed + 1, concepts };
     }
-    case 'quiz-graded': {
-      let { correct, partial, incorrect } = stats;
-      for (const result of event.results) {
-        if (result.verdict === 'correct') correct++;
-        else if (result.verdict === 'partial') partial++;
-        else incorrect++;
+    case 'answers-submitted': {
+      const clientVerdicts = { ...stats.clientVerdicts };
+      for (const answer of event.answers) {
+        if (answer.verdict) clientVerdicts[`${event.quizId}:${answer.question_id}`] = answer.verdict;
       }
-      return { ...stats, quizzesGraded: stats.quizzesGraded + 1, correct, partial, incorrect };
+      return withVerdictCounts({ ...stats, clientVerdicts });
+    }
+    case 'quiz-graded': {
+      const serverVerdicts = { ...stats.serverVerdicts };
+      for (const result of event.results) {
+        serverVerdicts[`${event.quizId}:${result.question_id}`] = result.verdict;
+      }
+      return withVerdictCounts({
+        ...stats,
+        quizzesGraded: stats.quizzesGraded + 1,
+        serverVerdicts,
+      });
     }
     case 'commit': {
       const parsed = nextReviewsFromDiff(event.commit.diff, event.todayIso);

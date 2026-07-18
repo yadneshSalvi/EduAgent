@@ -27,6 +27,9 @@
   --text-muted: #5d6474;
   --accent: #5b4bd4;
   --accent-soft: #5b4bd41f;
+  /* Accent used AS SMALL TEXT on accent-soft/bg (AA 4.5:1; the raw accent
+     is a fill/large-text color and lands at ~3.95 on soft washes). */
+  --accent-text: #5b4bd4;
   /* Status hues darkened for AA on paper (only accent is pinned by the spec;
      these are derived — tune in the Phase 5 light-theme pass if needed). */
   --success: #1a9e68;
@@ -58,6 +61,7 @@
   --text-muted: #8b93a7;
   --accent: #7c6aef;
   --accent-soft: #7c6aef1f;
+  --accent-text: #9d8fff;
   --success: #3ecf8e;
   --warn: #f5a623;
   --danger: #f0526a;
@@ -117,6 +121,7 @@
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-accent-soft: var(--accent-soft);
+  --color-primary-legible: var(--accent-text);
   --color-success: var(--success);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
@@ -362,8 +367,8 @@
   -webkit-appearance: none;
   appearance: none;
   pointer-events: auto;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 9999px;
   background: var(--accent);
   border: 2px solid var(--bg);
@@ -372,8 +377,8 @@
 }
 .tm-range::-moz-range-thumb {
   pointer-events: auto;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 9999px;
   background: var(--accent);
   border: 2px solid var(--bg);

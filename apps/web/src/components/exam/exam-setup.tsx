@@ -110,7 +110,7 @@ function SetupCard({ readiness }: { readiness: Readiness[] }) {
       </div>
 
       <div className="flex flex-col gap-2" role="radiogroup" aria-label="Track">
-        <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+        <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
           track
         </p>
         {readiness.map((track) => (
@@ -124,7 +124,7 @@ function SetupCard({ readiness }: { readiness: Readiness[] }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+        <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
           duration
         </p>
         <div className="flex gap-2" role="radiogroup" aria-label="Duration">
@@ -150,7 +150,7 @@ function SetupCard({ readiness }: { readiness: Readiness[] }) {
 
       {selected && selected.weakest.length > 0 ? (
         <div className="flex flex-col gap-2 rounded-md border border-dashed bg-surface-2/40 p-4">
-          <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground/80">
+          <p className="font-mono text-caption uppercase tracking-wide text-muted-foreground">
             what it targets
           </p>
           <div className="flex flex-wrap gap-1.5">
