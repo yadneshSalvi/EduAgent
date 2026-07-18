@@ -220,7 +220,9 @@ describe.runIf(enabled)('Phase 4 exam golden path (real codex)', () => {
     const dto = await getExam(examId);
     const row = await prisma!.exam.findUniqueOrThrow({ where: { id: examId } });
     expect(dto.threadId).toBe(row.threadId);
-    return dto.threadId;
+    // Live exams always carry their fork; null is only for seeded history.
+    expect(dto.threadId).not.toBeNull();
+    return dto.threadId!;
   };
 
   const getExam = async (examId: string): Promise<ExamDto> =>

@@ -15,6 +15,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { MemoryCommit, WsEvent } from '@eduagent/shared';
 import { parseWsFrame } from '@/hooks/use-turn-stream';
 import { userSocketUrl } from '@/lib/api';
+import { isLearnerVisibleCommit } from '@/lib/commit-format';
 import { CommitToast } from './commit-toast';
 import { DiffDrawer } from './diff-drawer';
 
@@ -76,7 +77,11 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
     (commit: MemoryCommit) => {
       if (seenShas.current.has(commit.sha)) return;
       seenShas.current.add(commit.sha);
-      setToasts((current) => [...current.slice(-(MAX_TOASTS - 1)), commit]);
+      // Examiner-only commits (empty visible diff) still invalidate queries —
+      // the timeline lists them — but never toast (isLearnerVisibleCommit).
+      if (isLearnerVisibleCommit(commit)) {
+        setToasts((current) => [...current.slice(-(MAX_TOASTS - 1)), commit]);
+      }
       // Server state moved (plans/04 §2): memory.commit invalidates the
       // dashboard payload and every memory-explorer query.
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });

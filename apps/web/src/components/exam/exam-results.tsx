@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { motion, useReducedMotion } from 'motion/react';
@@ -19,7 +19,6 @@ import type { ExamDto, ExamResult } from '@eduagent/shared';
 import { Markdown } from '@/components/chat/markdown';
 import { GaugeDial } from '@/components/dashboard/readiness-gauge';
 import { useMemoryCommits } from '@/components/memory/memory-commit-provider';
-import { EMPTY_TREE_SHA } from '@/components/dashboard/timeline-feed';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTickedNumber } from '@/components/shared/number-ticker';
@@ -29,10 +28,12 @@ import {
   buildQuestionResults,
   clearExamLocal,
   conceptOutcome,
-  findExamCommitIndex,
+  locateExamCommit,
   readinessSweep,
   totalPoints,
+  waitForExamCommit,
   type ConceptResult,
+  type LocatedExamCommit,
   type QuestionResultView,
 } from '@/lib/exam';
 import { MONACO_FONT_FAMILY, defineEduAgentTheme } from '@/lib/monaco-theme';
@@ -313,25 +314,30 @@ export function QuestionReview({ view }: { view: QuestionResultView }) {
   );
 }
 
-/** "See what this did to your memory" → the exam commit in the Diff Drawer. */
+/**
+ * "See what this did to your memory" → the exam commit in the Diff Drawer.
+ * Self-healing (Phase 6 fix 3): grading flips the exam to `graded` moments
+ * before the commit reaches the log, so a click that wins that race waits —
+ * calm copy, 3s polling, 60s cap — and opens the drawer itself when the
+ * commit lands, instead of erroring at the demo's most-watched moment.
+ */
 function MemoryCommitLink({ exam }: { exam: ExamDto }) {
   const { openDrawer } = useMemoryCommits();
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'waiting'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    cancelledRef.current = false;
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, []);
 
-  const open = async () => {
-    setBusy(true);
-    setError(null);
+  const openCommit = async (located: LocatedExamCommit) => {
+    const { entry, fromSha } = located;
     try {
-      const { commits } = await getMemoryLog({ limit: 50 });
-      const index = findExamCommitIndex(commits, exam.submittedAt);
-      const entry = index === -1 ? undefined : commits[index];
-      if (!entry) {
-        setError("The exam commit hasn't landed in your memory log yet — try again in a moment.");
-        return;
-      }
-      const from = commits[index + 1]?.sha ?? EMPTY_TREE_SHA;
-      const { diff, stats } = await getMemoryDiff(from, entry.sha);
+      const { diff, stats } = await getMemoryDiff(fromSha, entry.sha);
+      if (cancelledRef.current) return;
       openDrawer({
         sha: entry.sha,
         type: entry.type,
@@ -342,13 +348,47 @@ function MemoryCommitLink({ exam }: { exam: ExamDto }) {
         stats,
         diff,
       });
+      setPhase('idle');
     } catch {
+      if (cancelledRef.current) return;
+      setPhase('idle');
       setError("The diff didn't come back — try again.");
-    } finally {
-      setBusy(false);
     }
   };
 
+  const open = async () => {
+    setPhase('checking');
+    setError(null);
+    let located: LocatedExamCommit | null;
+    try {
+      const { commits } = await getMemoryLog({ limit: 50 });
+      located = locateExamCommit(commits, exam.submittedAt);
+    } catch {
+      if (cancelledRef.current) return;
+      setPhase('idle');
+      setError("The diff didn't come back — try again.");
+      return;
+    }
+    if (located === null) {
+      // Clicked before the commit landed — wait for the examiner to file it.
+      if (cancelledRef.current) return;
+      setPhase('waiting');
+      located = await waitForExamCommit({
+        fetchLog: async () => (await getMemoryLog({ limit: 50 })).commits,
+        submittedAt: exam.submittedAt,
+        isCancelled: () => cancelledRef.current,
+      });
+    }
+    if (cancelledRef.current) return;
+    if (located === null) {
+      setPhase('idle');
+      setError("The exam commit hasn't landed in your memory log yet — try again in a moment.");
+      return;
+    }
+    await openCommit(located);
+  };
+
+  const busy = phase !== 'idle';
   return (
     <section
       aria-label="Memory commit"
@@ -359,9 +399,16 @@ function MemoryCommitLink({ exam }: { exam: ExamDto }) {
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <p className="text-body font-medium">This exam changed your memory.</p>
-        <p className="text-caption text-muted-foreground">
-          Grading committed mastery evidence per concept — readiness moved because the memory did.
-        </p>
+        {phase === 'waiting' ? (
+          <p role="status" className="text-caption text-muted-foreground">
+            The examiner is filing this into your memory…
+          </p>
+        ) : (
+          <p className="text-caption text-muted-foreground">
+            Grading committed mastery evidence per concept — readiness moved because the memory
+            did.
+          </p>
+        )}
         {error ? <p className="text-caption text-danger">{error}</p> : null}
       </div>
       <Button variant="outline" className="gap-1.5" disabled={busy} onClick={() => void open()}>

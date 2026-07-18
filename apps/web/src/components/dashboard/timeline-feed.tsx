@@ -6,7 +6,7 @@ import type { MemoryCommitType, TimelineEntry } from '@eduagent/shared';
 import { useMemoryCommits } from '@/components/memory/memory-commit-provider';
 import { Button } from '@/components/ui/button';
 import { getMemoryDiff, getMemoryLog } from '@/lib/api';
-import { commitBadge, formatDelta, shortSha } from '@/lib/commit-format';
+import { commitBadge, EMPTY_TREE_SHA, formatDelta, shortSha } from '@/lib/commit-format';
 import { formatRelativeTime } from '@/lib/dashboard-data';
 import { cn } from '@/lib/utils';
 
@@ -17,9 +17,6 @@ import { cn } from '@/lib/utils';
  * Pages through /api/memory/log via the additive `skip` param.
  */
 const PAGE_SIZE = 50;
-
-/** git's canonical empty-tree object — the "parent" of a root commit. */
-export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 const TYPE_BADGE: Record<MemoryCommitType, string> = {
   learn: 'bg-accent-soft text-primary-legible',

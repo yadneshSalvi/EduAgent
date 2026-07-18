@@ -5,22 +5,28 @@ import { workspacePathFor, type AppConfig } from '../config.js';
 import { DashboardService } from '../learning/DashboardService.js';
 import { WorkspaceManager, type WorkspaceLogger } from '../workspace/index.js';
 import { ALEX_TIMEZONE, seedAlexWorkspace, type AlexSeedResult } from './alex.js';
+import { buildAlexExamRow } from './exam-row.js';
 
 /**
  * Demo seeding orchestration (plans/02 §7):
  *
  * - `seedDemo()` — wipe + recreate BOTH demo users (alex with ~21 days of
- *   history, sam with an initialized-but-empty workspace). Idempotent.
+ *   history, sam with an initialized-but-empty workspace) AND purge every
+ *   OTHER user (QA/dev leftovers) with their rows + workspaces, so the login
+ *   picker shows exactly alex, sam after a full reseed. Idempotent.
  * - `seedDemo({ only: 'alex', force: true })` — reset alex only, recreating
  *   the workspace and derived rows (threads/exercises/exams/activity) while
  *   PRESERVING the User row (`id`, `authId`) so a hosted-demo Clerk link
  *   survives the nightly reset (plans/08 §6).
  *
- * Deliberately seeds NO Thread/Exam/Exercise rows: a Thread row must carry a
- * real codex thread id (with a rollout) or downstream fork/resume calls fail,
- * and codex rollouts cannot be fabricated offline — see docs in the Phase 5
- * report. Alex's past exam lives in the workspace (exam record + exam commit),
- * which is all the dashboard reads.
+ * Deliberately seeds NO Thread/Exercise rows: a Thread row must carry a real
+ * codex thread id (with a rollout) or downstream fork/resume calls fail, and
+ * codex rollouts cannot be fabricated offline — see docs in the Phase 5
+ * report. Alex's past exam lives in the workspace (exam record + exam commit)
+ * PLUS one graded Exam row with `threadId: null` (exam-row.ts): graded is
+ * terminal, so the results view renders from the row's own JSON and no code
+ * path ever resolves its thread — which puts the sitting in /app/exam History
+ * without fabricating a rollout.
  *
  * Run with the API server STOPPED (or restart it afterwards): the server
  * caches dashboards in memory and holds the SQLite file; seeding underneath a
@@ -81,6 +87,13 @@ export async function seedDemo(opts: SeedOptions): Promise<SeedSummary> {
   const targets = opts.only ? [opts.only] : (['alex', 'sam'] as const);
   const summary: SeedSummary = { elapsedMs: 0 };
 
+  // Full reseed = pristine demo world: every user that is NOT a demo user
+  // (QA handles, dev logins) goes away entirely, rows and workspace both —
+  // otherwise the local-mode login picker keeps listing them forever.
+  if (!opts.only) {
+    await purgeNonDemoUsers(opts, logger);
+  }
+
   for (const key of targets) {
     const spec = DEMO_USERS[key];
     const existing = await opts.prisma.user.findUnique({ where: { handle: spec.handle } });
@@ -116,12 +129,7 @@ async function resetUser(
   const preserveRow = Boolean(opts.only && opts.force);
 
   if (existing) {
-    await prisma.exerciseAttempt.deleteMany({ where: { exercise: { userId: existing.id } } });
-    await prisma.exercise.deleteMany({ where: { userId: existing.id } });
-    await prisma.itemMirror.deleteMany({ where: { thread: { userId: existing.id } } });
-    await prisma.exam.deleteMany({ where: { userId: existing.id } });
-    await prisma.thread.deleteMany({ where: { userId: existing.id } });
-    await prisma.activityEvent.deleteMany({ where: { userId: existing.id } });
+    await deleteDerivedRows(prisma, existing.id);
     await removeWorkspaceDir(config, existing.workspacePath, logger);
     if (!preserveRow) {
       await prisma.user.delete({ where: { id: existing.id } });
@@ -143,6 +151,30 @@ async function resetUser(
     return prisma.user.update({ where: { id: existing.id }, data });
   }
   return prisma.user.create({ data: { id, ...data } });
+}
+
+/** Every row hanging off a user, in FK-safe order (the User row survives). */
+async function deleteDerivedRows(prisma: PrismaClient, userId: string): Promise<void> {
+  await prisma.exerciseAttempt.deleteMany({ where: { exercise: { userId } } });
+  await prisma.exercise.deleteMany({ where: { userId } });
+  await prisma.itemMirror.deleteMany({ where: { thread: { userId } } });
+  await prisma.exam.deleteMany({ where: { userId } });
+  await prisma.thread.deleteMany({ where: { userId } });
+  await prisma.activityEvent.deleteMany({ where: { userId } });
+}
+
+/** Full-reseed cleanup: drop every user that is not alex/sam, workspace included. */
+async function purgeNonDemoUsers(opts: SeedOptions, logger: WorkspaceLogger): Promise<void> {
+  const demoHandles = Object.values(DEMO_USERS).map((u) => u.handle);
+  const strays = await opts.prisma.user.findMany({
+    where: { handle: { notIn: demoHandles } },
+  });
+  for (const stray of strays) {
+    await deleteDerivedRows(opts.prisma, stray.id);
+    await removeWorkspaceDir(opts.config, stray.workspacePath, logger);
+    await opts.prisma.user.delete({ where: { id: stray.id } });
+    logger.info({ handle: stray.handle, userId: stray.id }, 'purged non-demo user');
+  }
 }
 
 /** rm -rf, but only ever inside <dataDir>/workspaces (defense in depth). */
@@ -208,6 +240,21 @@ async function buildWorkspace(
     });
   }
   await opts.prisma.activityEvent.createMany({ data: rows });
+
+  // The graded Exam DB row for the mock two days back — same content as the
+  // workspace record, no thread (see the module doc above).
+  const examCommit = result.commits.find((c) => c.type === 'exam');
+  if (examCommit) {
+    await opts.prisma.exam.create({
+      data: buildAlexExamRow({
+        userId: user.id,
+        before: result.exam.before,
+        after: result.exam.after,
+        gradedAt: examCommit.instant,
+        targeting: result.exam.targeting,
+      }),
+    });
+  }
 
   // Post-seed sanity snapshot (the CLI prints it; the test asserts the bands).
   const dashboard = await new DashboardService({ prisma: opts.prisma, workspaces }).get(user.id, {

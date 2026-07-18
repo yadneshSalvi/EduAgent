@@ -4,6 +4,9 @@ import type { PrismaClient } from '@prisma/client';
 import {
   addDays,
   dashboardDataSchema,
+  examAnswersSchema,
+  examQuestionsSchema,
+  examResultSchema,
   localDate,
   masteryFileSchema,
   profileFrontmatterSchema,
@@ -242,6 +245,51 @@ describe('dashboard numbers (the demo video contract)', () => {
   });
 });
 
+describe('seeded Exam DB row (Phase 6: History shows the mock sitting)', () => {
+  it('one graded, thread-less exam whose JSON parses under the shared schemas', async () => {
+    const exams = await prisma.exam.findMany({ where: { userId: summary.alex!.userId } });
+    expect(exams).toHaveLength(1);
+    const exam = exams[0]!;
+    expect(exam.status).toBe('graded');
+    expect(exam.threadId).toBeNull();
+    expect(exam.trackSlug).toBe('sql-interview');
+
+    const questions = examQuestionsSchema.parse(exam.questions);
+    expect(questions.sections.flatMap((s) => s.questions)).toHaveLength(8);
+    const result = examResultSchema.parse(exam.result);
+    expect(result.total).toBe(71);
+    expect(result.per_question.reduce((sum, q) => sum + q.points_awarded, 0)).toBe(71);
+    expect(questions.sections.flatMap((s) => s.questions).reduce((s, q) => s + q.points, 0)).toBe(
+      100,
+    );
+    // The row's readiness snapshot IS the workspace record's snapshot.
+    expect(result.readiness_before).toBeCloseTo(summary.alex!.exam!.before, 5);
+    expect(result.readiness_after).toBeCloseTo(summary.alex!.exam!.after, 5);
+    // Every question has an answer as sat, so the results view renders full.
+    const answers = examAnswersSchema.parse(exam.answers);
+    for (const q of questions.sections.flatMap((s) => s.questions)) {
+      expect(answers[q.id], `answer for ${q.id}`).toBeTruthy();
+    }
+  });
+
+  it('is dated with the exam commit two days back (createdAt < startedAt < submittedAt < gradedAt)', async () => {
+    const exam = (await prisma.exam.findFirst({ where: { userId: summary.alex!.userId } }))!;
+    expect(localDate(exam.gradedAt!, ALEX_TIMEZONE)).toBe(addDays(today, -2));
+    expect(exam.createdAt.getTime()).toBeLessThan(exam.startedAt!.getTime());
+    expect(exam.startedAt!.getTime()).toBeLessThan(exam.submittedAt!.getTime());
+    expect(exam.submittedAt!.getTime()).toBeLessThan(exam.gradedAt!.getTime());
+    // Grading lands with the exam commit — same instant the timeline shows.
+    const events = await prisma.activityEvent.findMany({
+      where: { userId: summary.alex!.userId, kind: 'commit' },
+    });
+    const examEvent = events.find(
+      (e) => (e.meta as { type?: string }).type === 'exam',
+    );
+    expect(examEvent).toBeDefined();
+    expect(exam.gradedAt!.getTime()).toBe(examEvent!.at.getTime());
+  });
+});
+
 describe('sam, idempotency and --force', () => {
   it('sam has an initialized-but-empty workspace (onboarding-fresh)', async () => {
     const samId = summary.sam!.userId;
@@ -280,13 +328,46 @@ describe('sam, idempotency and --force', () => {
     );
   });
 
-  it('full reseed is idempotent (wipe + recreate, same world)', async () => {
+  it('--user alex --force leaves other (non-demo) users alone', async () => {
+    await prisma.user.create({
+      data: {
+        id: 'qa-keeper',
+        handle: 'qa-keeper',
+        displayName: 'QA Keeper',
+        workspacePath: 'workspaces/qa-keeper',
+      },
+    });
+    await seedDemo({ config, prisma, now: SEED_NOW, only: 'alex', force: true });
+    expect(await prisma.user.findUnique({ where: { handle: 'qa-keeper' } })).not.toBeNull();
+  }, 60_000);
+
+  it('full reseed is idempotent AND purges non-demo users (pristine login picker)', async () => {
+    // Simulates QA leftovers: a user with derived rows and a workspace dir
+    // (qa-keeper from the previous test is still around too — both must go).
+    const junkDir = path.join(config.dataDir, 'workspaces', 'qa-junk');
+    await fs.mkdir(junkDir, { recursive: true });
+    const junk = await prisma.user.create({
+      data: {
+        id: 'qa-junk',
+        handle: 'qa-junk',
+        displayName: 'QA Junk',
+        workspacePath: 'workspaces/qa-junk',
+      },
+    });
+    await prisma.activityEvent.create({
+      data: { userId: junk.id, kind: 'session_start', meta: {} },
+    });
+
     const again = await seedDemo({ config, prisma, now: SEED_NOW });
     expect(again.alex!.commits).toBe(summary.alex!.commits);
     const alex = await prisma.user.findUnique({ where: { handle: 'alex' } });
     expect(alex!.authId).toBeNull(); // full wipe resets the Clerk link by design
-    const users = await prisma.user.count();
-    expect(users).toBe(2);
+    const handles = (await prisma.user.findMany({ orderBy: { createdAt: 'asc' } })).map(
+      (u) => u.handle,
+    );
+    expect(handles).toEqual(['alex', 'sam']); // purged + alex first for the picker
+    expect(await prisma.activityEvent.count({ where: { userId: junk.id } })).toBe(0);
+    await expect(fs.access(junkDir)).rejects.toThrow(); // workspace dir removed too
   }, 120_000);
 
   it('full seed completes in under 60s', () => {

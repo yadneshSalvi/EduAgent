@@ -268,8 +268,12 @@ export type ExamResult = z.infer<typeof examResultSchema>;
  */
 export const examDtoSchema = z.object({
   id: z.string().min(1),
-  /** The forked exam thread — the socket generation/grading activity streams on. */
-  threadId: z.string().min(1),
+  /**
+   * The forked exam thread — the socket generation/grading activity streams
+   * on. Null for historical graded exams whose fork no longer exists (seeded
+   * history): graded is terminal, so no thread is ever needed again.
+   */
+  threadId: z.string().min(1).nullable(),
   trackSlug: slugSchema,
   status: examStatusSchema,
   durationMin: z.number().int().positive(),

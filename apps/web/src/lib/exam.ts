@@ -7,6 +7,7 @@ import type {
   ExamStatus,
   TimelineEntry,
 } from '@eduagent/shared';
+import { EMPTY_TREE_SHA } from './commit-format';
 import type { KeyValueStore } from './workbench';
 
 /**
@@ -385,6 +386,77 @@ export function findExamCommitIndex(
     (entry) =>
       entry.type === 'exam' && (floor === null || new Date(entry.date).getTime() >= floor),
   );
+}
+
+/** The located exam commit plus the diff base (parent, or the empty tree for a root commit). */
+export interface LocatedExamCommit {
+  entry: TimelineEntry;
+  fromSha: string;
+}
+
+/** `findExamCommitIndex` + the parent sha the Diff Drawer diffs from. */
+export function locateExamCommit(
+  commits: TimelineEntry[],
+  submittedAt: string | null,
+): LocatedExamCommit | null {
+  const index = findExamCommitIndex(commits, submittedAt);
+  const entry = index === -1 ? undefined : commits[index];
+  if (!entry) return null;
+  return { entry, fromSha: commits[index + 1]?.sha ?? EMPTY_TREE_SHA };
+}
+
+// ---------------------------------------------------------------------------
+// Self-healing "see the memory diff" CTA: the grading commit lands moments
+// after `graded` (same turn, different write), so a click that beats it polls
+// the log until it appears instead of erroring (Phase 6 pre-record fix 3).
+// ---------------------------------------------------------------------------
+
+export const EXAM_COMMIT_POLL_INTERVAL_MS = 3_000;
+export const EXAM_COMMIT_POLL_TIMEOUT_MS = 60_000;
+
+export interface WaitForExamCommitOptions {
+  /** Newest-first memory log fetch; errors are treated as "not yet" and retried. */
+  fetchLog: () => Promise<TimelineEntry[]>;
+  submittedAt: string | null;
+  intervalMs?: number;
+  timeoutMs?: number;
+  /** Injected for tests; defaults to a real setTimeout sleep. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Polling stops (resolving null) once this reports true — unmount safety. */
+  isCancelled?: () => boolean;
+}
+
+/**
+ * Polls the memory log until the sitting's exam commit appears, up to
+ * `timeoutMs`. Resolves the located commit, or null on timeout/cancellation.
+ * The FIRST fetch happens immediately — callers who already fetched once
+ * simply accept one quick duplicate rather than special-casing.
+ */
+export async function waitForExamCommit(
+  options: WaitForExamCommitOptions,
+): Promise<LocatedExamCommit | null> {
+  const intervalMs = options.intervalMs ?? EXAM_COMMIT_POLL_INTERVAL_MS;
+  const timeoutMs = options.timeoutMs ?? EXAM_COMMIT_POLL_TIMEOUT_MS;
+  const sleep =
+    options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const attempts = Math.max(1, Math.floor(timeoutMs / intervalMs) + 1);
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (options.isCancelled?.()) return null;
+    if (attempt > 0) {
+      await sleep(intervalMs);
+      if (options.isCancelled?.()) return null;
+    }
+    try {
+      const commits = await options.fetchLog();
+      const located = locateExamCommit(commits, options.submittedAt);
+      if (located !== null) return located;
+    } catch {
+      // Transient log failures while waiting are indistinguishable from "not
+      // landed yet" for the learner — keep polling until the cap.
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

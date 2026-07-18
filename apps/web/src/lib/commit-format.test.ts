@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { commitBadge, formatDelta, formatDiffStats, shortSha } from './commit-format';
+import {
+  commitBadge,
+  commitToastDurationMs,
+  DEFAULT_COMMIT_TOAST_MS,
+  formatDelta,
+  formatDiffStats,
+  isLearnerVisibleCommit,
+  shortSha,
+} from './commit-format';
 import { formatMastery, masteryColor } from './mastery';
 import { GREETING_COMMIT, ONBOARDING_COMMIT } from './fixtures/turn-preview';
 
@@ -54,5 +62,49 @@ describe('mastery helpers', () => {
   it('interpolates between stops', () => {
     // halfway between 0.75 (#2E9E7A) and 1.0 (#3ECF8E)
     expect(masteryColor(0.875)).toBe('#36B784');
+  });
+});
+
+describe('isLearnerVisibleCommit (Phase 6 fix: examiner-only commits never toast)', () => {
+  const empty = { stats: { filesChanged: 0, insertions: 0, deletions: 0 }, diff: '', deltas: [] };
+
+  it('suppresses a commit whose visible diff was fully excluded (.exercises authoring)', () => {
+    expect(isLearnerVisibleCommit(empty)).toBe(false);
+    expect(isLearnerVisibleCommit({ ...empty, diff: '  \n' })).toBe(false);
+  });
+
+  it('keeps commits with visible files, diff text, or mastery deltas', () => {
+    expect(
+      isLearnerVisibleCommit({ ...empty, stats: { filesChanged: 2, insertions: 5, deletions: 1 } }),
+    ).toBe(true);
+    expect(isLearnerVisibleCommit({ ...empty, diff: 'diff --git a/x b/x' })).toBe(true);
+    expect(
+      isLearnerVisibleCommit({ ...empty, deltas: [{ concept: 'inner-join', from: 0.4, to: 0.7 }] }),
+    ).toBe(true);
+  });
+
+  it('keeps the fixture commits (real learner-facing events)', () => {
+    expect(isLearnerVisibleCommit(GREETING_COMMIT)).toBe(true);
+    expect(isLearnerVisibleCommit(ONBOARDING_COMMIT)).toBe(true);
+  });
+});
+
+describe('commitToastDurationMs (Phase 6 fix: 15s default, env-tunable)', () => {
+  it('defaults to 15s', () => {
+    expect(DEFAULT_COMMIT_TOAST_MS).toBe(15_000);
+    expect(commitToastDurationMs(undefined)).toBe(15_000);
+  });
+
+  it('parses a valid override', () => {
+    expect(commitToastDurationMs('20000')).toBe(20_000);
+    expect(commitToastDurationMs('2500.9')).toBe(2500);
+  });
+
+  it('rejects junk and sub-second values', () => {
+    expect(commitToastDurationMs('')).toBe(15_000);
+    expect(commitToastDurationMs('fast')).toBe(15_000);
+    expect(commitToastDurationMs('0')).toBe(15_000);
+    expect(commitToastDurationMs('999')).toBe(15_000);
+    expect(commitToastDurationMs('-4000')).toBe(15_000);
   });
 });

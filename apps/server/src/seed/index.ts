@@ -2,7 +2,9 @@
  * `pnpm seed` — the demo seeder CLI (plans/02 §7, plans/06 Phase 5 task 1).
  *
  *   pnpm seed                      wipe + recreate alex (~140-commit history)
- *                                  and sam (empty workspace)
+ *                                  and sam (empty workspace); purges every
+ *                                  other user (QA/dev leftovers) so the login
+ *                                  picker shows exactly alex, sam
  *   pnpm seed --user alex --force  reset alex only, preserving the User row
  *                                  (id + authId/Clerk link)
  *   pnpm seed --now <iso>          deterministic seed-day override (tests)

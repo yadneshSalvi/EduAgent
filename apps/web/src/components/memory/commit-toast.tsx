@@ -5,15 +5,21 @@ import { motion, useReducedMotion } from 'motion/react';
 import { GitCommitHorizontal, X } from 'lucide-react';
 import type { MemoryCommit } from '@eduagent/shared';
 import { useTickedNumber } from '@/components/shared/number-ticker';
-import { commitBadge, formatDiffStats, shortSha } from '@/lib/commit-format';
+import {
+  commitBadge,
+  commitToastDurationMs,
+  formatDiffStats,
+  shortSha,
+} from '@/lib/commit-format';
 import { formatMastery, masteryColor } from '@/lib/mastery';
 
 /**
  * Memory-commit toast (plans/05 §6.1, step 1): bottom-right, mono type badge
  * `learn(sql)`, headline, delta chips ticking 0.40→0.72 with a color sweep
- * toward mastery green. Auto-dismisses in 8s; hover pins. Click → Diff Drawer.
+ * toward mastery green. Auto-dismisses after `autoDismissMs` (default 15s,
+ * NEXT_PUBLIC_COMMIT_TOAST_MS overrides); hover pins. Click → Diff Drawer.
  */
-const AUTO_DISMISS_MS = 8000;
+const AUTO_DISMISS_MS = commitToastDurationMs(process.env.NEXT_PUBLIC_COMMIT_TOAST_MS);
 const MAX_DELTA_CHIPS = 3;
 
 function DeltaTickChip({
@@ -55,11 +61,18 @@ interface CommitToastProps {
   commit: MemoryCommit;
   onOpen: () => void;
   onDismiss: () => void;
+  /** Auto-dismiss window; defaults to the env-configurable 15s. */
+  autoDismissMs?: number;
 }
 
-export function CommitToast({ commit, onOpen, onDismiss }: CommitToastProps) {
+export function CommitToast({
+  commit,
+  onOpen,
+  onDismiss,
+  autoDismissMs = AUTO_DISMISS_MS,
+}: CommitToastProps) {
   const reducedMotion = useReducedMotion();
-  const remaining = useRef(AUTO_DISMISS_MS);
+  const remaining = useRef(autoDismissMs);
   const armedAt = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 

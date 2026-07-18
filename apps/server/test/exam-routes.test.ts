@@ -12,6 +12,7 @@ import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createPrisma } from '../src/db.js';
 import { ExamService } from '../src/learning/index.js';
+import { buildAlexExamRow } from '../src/seed/exam-row.js';
 import type { EnsureThreadResult, ExamForkOptions, ExamThreadService } from '../src/threads/index.js';
 import { WorkspaceManager } from '../src/workspace/index.js';
 import { createTestDbUrl } from './helpers/test-db.js';
@@ -356,5 +357,51 @@ describe('exam lifecycle over HTTP', () => {
       (await app.inject({ method: 'GET', url: '/api/exams', headers: { cookie: otherCookie } })).json(),
     );
     expect(foreign.exams).toHaveLength(0);
+  });
+});
+
+describe('historical graded exams without a thread (Phase 6: seeded history)', () => {
+  it('GET list + detail serve a threadId-null graded row; nothing resolves its thread', async () => {
+    const user = await prisma.user.findUniqueOrThrow({ where: { handle: 'exam-user' } });
+    const row = buildAlexExamRow({
+      userId: user.id,
+      before: 55.1,
+      after: 64.3,
+      gradedAt: new Date('2026-07-16T17:00:00Z'),
+      targeting: [{ concept: 'union-set-ops', name: 'UNION & set ops', effective: 0.3 }],
+    });
+    await prisma.exam.create({ data: row });
+
+    const list = listExamsResponseSchema.parse(
+      (await app.inject({ method: 'GET', url: '/api/exams', headers: { cookie } })).json(),
+    );
+    const summary = list.exams.find((e) => e.id === row.id);
+    expect(summary).toBeDefined();
+    expect(summary!.status).toBe('graded');
+    expect(summary!.threadId).toBeNull();
+
+    const detail = examDtoSchema.parse(
+      (await app.inject({ method: 'GET', url: `/api/exams/${row.id}`, headers: { cookie } })).json(),
+    );
+    expect(detail.threadId).toBeNull();
+    expect(detail.status).toBe('graded');
+    expect(detail.questions?.sections.flatMap((s) => s.questions)).toHaveLength(8);
+    expect(detail.result?.total).toBe(71);
+    expect(detail.result?.readiness_before).toBe(55.1);
+    expect(detail.result?.readiness_after).toBe(64.3);
+    expect(detail.answers?.q1).toContain('SELECT');
+
+    // Re-submitting a graded, thread-less exam must 409 (state machine), not
+    // crash trying to resolve the missing fork.
+    const resubmit = await app.inject({
+      method: 'POST',
+      url: `/api/exams/${row.id}/submit`,
+      payload: { answers: {} },
+      headers: { cookie },
+    });
+    expect(resubmit.statusCode).toBe(409);
+    expect(resubmit.json()).toMatchObject({ error: 'invalid_state' });
+
+    await prisma.exam.delete({ where: { id: row.id } });
   });
 });

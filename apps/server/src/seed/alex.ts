@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { addDays, effectiveMastery, readinessScore } from '@eduagent/shared';
+import type { ExamTarget } from '../learning/exam-config.js';
 import { GitService, parseCommit } from '../workspace/GitService.js';
+import { ALEX_EXAM_QUESTIONS } from './exam-row.js';
 import { WORKSPACE_INIT_COMMIT, WORKSPACE_TEMPLATE } from '../workspace/template.js';
 import {
   EXAM_EVIDENCE_BULLETS,
@@ -67,8 +69,12 @@ export interface SeededCommit {
 
 export interface AlexSeedResult {
   commits: SeededCommit[];
-  /** Track readiness at the exam moment, before/after grading (1dp). */
-  exam: { before: number; after: number; delta: number };
+  /**
+   * Track readiness at the exam moment, before/after grading (1dp), plus the
+   * weakest-at-exam targeting — seed.ts mirrors these into the graded Exam DB
+   * row so /app/exam History matches the workspace record.
+   */
+  exam: { before: number; after: number; delta: number; targeting: ExamTarget[] };
   today: string;
 }
 
@@ -139,7 +145,7 @@ class AlexGenerator {
   private profileBody = PROFILE_BODY;
   private exerciseNo = 0;
   private quizNo = 0;
-  private examReadiness = { before: 0, after: 0, delta: 0 };
+  private examReadiness: AlexSeedResult['exam'] = { before: 0, after: 0, delta: 0, targeting: [] };
 
   constructor(
     private readonly dir: string,
@@ -381,17 +387,38 @@ class AlexGenerator {
   ): Promise<void> {
     const sqlTrack = TRACKS[0]!;
     const before = this.trackReadiness(sqlTrack, instant);
+    // What the examiner "targeted": the 5 weakest tested concepts by pre-exam
+    // effective mastery — the same shape ExamService.targetingFor computes live.
+    const targeting: ExamTarget[] = steps
+      .map(({ concept }) => {
+        const state = this.concepts.get(`sql/${concept.id}`);
+        return {
+          concept: concept.id,
+          name: concept.name,
+          effective:
+            state && state.stepIdx > 0
+              ? effectiveMastery(state.mastery, state.reviewCount, state.lastAssessed, instant)
+              : 0,
+        };
+      })
+      .sort((a, b) => a.effective - b.effective)
+      .slice(0, 5);
     const deltas: Array<{ id: string; from: number; to: number }> = [];
     for (const { concept, step } of steps) {
       const { from } = this.applyStep('sql', concept, step, day);
       deltas.push({ id: concept.id, from, to: step.to });
     }
     const after = this.trackReadiness(sqlTrack, instant);
-    const delta = after - before;
+    // Delta from the ROUNDED endpoints: the results view derives its pill as
+    // round1(after − before) of the stored 1dp snapshot, and every surface
+    // (record bullet, commit body, results pill) must show the same number.
+    const before1 = round1(before);
+    const after1 = round1(after);
     this.examReadiness = {
-      before: round1(before),
-      after: round1(after),
-      delta: round1(delta),
+      before: before1,
+      after: after1,
+      delta: round1(after1 - before1),
+      targeting,
     };
 
     // Headline showcases the concepts the demo narrative stars (the joins
@@ -745,16 +772,17 @@ class AlexGenerator {
   ): Promise<void> {
     const date = this.clock.dayIso(day);
     const { before, after, delta } = this.examReadiness;
-    const questions = [
-      { id: 'q1', kind: 'coding', concept: 'inner-join', gist: 'Revenue per customer via INNER JOIN + GROUP BY', verdict: 'correct', pts: '18/18' },
-      { id: 'q2', kind: 'coding', concept: 'left-join', gist: 'Customers with zero orders (LEFT JOIN … IS NULL)', verdict: 'partial', pts: '10/18', note: 'COUNT counted NULL-extended rows' },
-      { id: 'q3', kind: 'mcq', concept: 'where-clause', gist: 'Predicate evaluation order', verdict: 'correct', pts: '8/8' },
-      { id: 'q4', kind: 'mcq', concept: 'union-set-ops', gist: 'UNION vs UNION ALL row counts', verdict: 'incorrect', pts: '0/8', note: 'predicted duplicates survive UNION' },
-      { id: 'q5', kind: 'mcq', concept: 'aggregates', gist: 'COUNT(*) vs COUNT(col) with NULLs', verdict: 'correct', pts: '8/8' },
-      { id: 'q6', kind: 'mcq', concept: 'subqueries', gist: 'Correlated subquery evaluation', verdict: 'correct', pts: '8/8' },
-      { id: 'q7', kind: 'short', concept: 'null-semantics', gist: 'Explain NULL = NULL in WHERE', verdict: 'partial', pts: '9/16', note: 'missed the three-valued logic framing' },
-      { id: 'q8', kind: 'short', concept: 'group-by', gist: 'Choose the grouping grain for a report', verdict: 'partial', pts: '10/16', note: 'grain right, justification thin' },
-    ];
+    // The question table is the seeded Exam DB row's content (exam-row.ts) —
+    // one source, so the record and the History results view cannot diverge.
+    const questions = ALEX_EXAM_QUESTIONS.map((q) => ({
+      id: q.id,
+      kind: q.kind,
+      concept: q.concept,
+      gist: q.gist,
+      verdict: q.verdict,
+      pts: `${q.pointsAwarded}/${q.points}`,
+      note: q.note,
+    }));
     const lines = [
       '---',
       `date: ${date}`,

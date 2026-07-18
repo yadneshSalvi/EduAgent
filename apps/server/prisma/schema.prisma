@@ -103,7 +103,7 @@ model Exam {
   id          String    @id @default(cuid())
   userId      String
   user        User      @relation(fields: [userId], references: [id])
-  threadId    String // the forked thread
+  threadId    String? // the forked thread; null for historical graded exams (seeded) whose fork never existed
   trackSlug   String
   config      Json // duration, sections requested
   questions   Json // full exam JSON from ui_create_exam

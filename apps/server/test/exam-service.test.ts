@@ -249,7 +249,8 @@ describe('create', () => {
     expect(config).toMatchObject({ durationMin: 45 });
     expect(config.targeting).toHaveLength(2);
 
-    const examThread = await prisma.thread.findUniqueOrThrow({ where: { id: exam.threadId } });
+    expect(exam.threadId).not.toBeNull();
+    const examThread = await prisma.thread.findUniqueOrThrow({ where: { id: exam.threadId! } });
     expect(examThread.mode).toBe('exam');
     expect(examThread.forkedFromId).toBe(learnThread.id);
 

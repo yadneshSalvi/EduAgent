@@ -191,7 +191,7 @@ export class ExamService {
    */
   private async reconcileGeneration(examId: string, userId: string): Promise<void> {
     const exam = await this.prisma.exam.findUnique({ where: { id: examId } });
-    if (exam === null || exam.status !== 'draft') return;
+    if (exam === null || exam.status !== 'draft' || exam.threadId === null) return;
     this.logger.warn(
       { examId, tag: 'prompt-bug' },
       'generation turn settled without ui_create_exam — exam still draft',
@@ -315,7 +315,7 @@ export class ExamService {
     const exam = await this.get(userId, examId);
     if (exam === null) return null;
     if (exam.status === 'submitted' && exam.result === null) {
-      if (this.threads.turnInFlight(exam.threadId)) {
+      if (exam.threadId !== null && this.threads.turnInFlight(exam.threadId)) {
         throw new ExamStateError('This exam is being graded — the result is on its way.', exam.status);
       }
       const stored = (exam.answers ?? {}) as ExamAnswers;
@@ -385,9 +385,12 @@ export class ExamService {
     const questions = examQuestionsSchema.parse(exam.questions);
     const submissionPaths = await this.writeCodingSubmissions(exam, questions, answers);
 
-    const thread = await this.prisma.thread.findUnique({ where: { id: exam.threadId } });
+    const thread =
+      exam.threadId === null
+        ? null
+        : await this.prisma.thread.findUnique({ where: { id: exam.threadId } });
     if (thread === null) {
-      throw new Error(`exam ${exam.id} references missing thread ${exam.threadId}`);
+      throw new Error(`exam ${exam.id} references missing thread ${exam.threadId ?? '(none)'}`);
     }
     // Rotate generate → grade developerInstructions: the status is already
     // `submitted`, so the forced re-resume rebuilds onto the grading template.
@@ -452,7 +455,7 @@ export class ExamService {
    */
   private async reconcileGrading(examId: string, userId: string): Promise<void> {
     const exam = await this.prisma.exam.findUnique({ where: { id: examId } });
-    if (exam === null || exam.status !== 'submitted') return;
+    if (exam === null || exam.status !== 'submitted' || exam.threadId === null) return;
     this.logger.warn(
       { examId, tag: 'prompt-bug' },
       'grading turn settled without ui_grade_exam — exam still submitted',

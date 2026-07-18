@@ -16,6 +16,7 @@ import {
   isAnswered,
   loadExamAnswers,
   loadExamFlags,
+  locateExamCommit,
   mergeAnswers,
   msRemaining,
   pollIntervalMs,
@@ -25,7 +26,9 @@ import {
   timerTone,
   totalPoints,
   unansweredCount,
+  waitForExamCommit,
 } from './exam';
+import { EMPTY_TREE_SHA } from './commit-format';
 
 const QUESTIONS: ExamQuestions = {
   track: 'cs-interviews',
@@ -324,5 +327,132 @@ describe('findExamCommitIndex', () => {
   it('returns -1 when the grading commit has not landed', () => {
     const commits = [entry({ type: 'exam', date: '2026-07-16T09:00:00.000Z' })];
     expect(findExamCommitIndex(commits, '2026-07-17T12:00:00.000Z')).toBe(-1);
+  });
+});
+
+describe('locateExamCommit', () => {
+  const entry = (over: Partial<TimelineEntry>): TimelineEntry => ({
+    sha: 'abc123',
+    type: 'learn',
+    topic: 'general',
+    headline: 'x',
+    bullets: [],
+    deltas: [],
+    date: '2026-07-17T12:00:00.000Z',
+    ...over,
+  });
+
+  it('pairs the exam commit with its parent as the diff base', () => {
+    const commits = [
+      entry({ sha: 'newer-learn', date: '2026-07-17T12:10:00.000Z' }),
+      entry({ sha: 'exam-commit', type: 'exam', date: '2026-07-17T12:05:00.000Z' }),
+      entry({ sha: 'parent-learn', date: '2026-07-17T11:00:00.000Z' }),
+    ];
+    expect(locateExamCommit(commits, '2026-07-17T12:05:30.000Z')).toEqual({
+      entry: commits[1],
+      fromSha: 'parent-learn',
+    });
+  });
+
+  it('diffs a root exam commit against the empty tree', () => {
+    const commits = [entry({ sha: 'root-exam', type: 'exam' })];
+    expect(locateExamCommit(commits, null)).toEqual({
+      entry: commits[0],
+      fromSha: EMPTY_TREE_SHA,
+    });
+  });
+
+  it('returns null when the commit has not landed', () => {
+    expect(locateExamCommit([entry({})], null)).toBeNull();
+    expect(locateExamCommit([], '2026-07-17T12:00:00.000Z')).toBeNull();
+  });
+});
+
+describe('waitForExamCommit (self-healing memory CTA, Phase 6 fix 3)', () => {
+  const examEntry: TimelineEntry = {
+    sha: 'exam-sha',
+    type: 'exam',
+    topic: 'sql',
+    headline: 'mock exam 1',
+    bullets: [],
+    deltas: [],
+    date: '2026-07-17T12:05:00.000Z',
+  };
+
+  it('resolves immediately when the commit is already in the log', async () => {
+    const sleeps: number[] = [];
+    const located = await waitForExamCommit({
+      fetchLog: () => Promise.resolve([examEntry]),
+      submittedAt: null,
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(located?.entry.sha).toBe('exam-sha');
+    expect(sleeps).toEqual([]); // first attempt never sleeps
+  });
+
+  it('polls at the given interval until the commit lands', async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const located = await waitForExamCommit({
+      fetchLog: () => Promise.resolve(++calls >= 3 ? [examEntry] : []),
+      submittedAt: null,
+      intervalMs: 3000,
+      timeoutMs: 60_000,
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(located?.entry.sha).toBe('exam-sha');
+    expect(calls).toBe(3);
+    expect(sleeps).toEqual([3000, 3000]);
+  });
+
+  it('gives up after the timeout cap', async () => {
+    let calls = 0;
+    const located = await waitForExamCommit({
+      fetchLog: () => {
+        calls++;
+        return Promise.resolve([]);
+      },
+      submittedAt: null,
+      intervalMs: 3000,
+      timeoutMs: 60_000,
+      sleep: () => Promise.resolve(),
+    });
+    expect(located).toBeNull();
+    expect(calls).toBe(21); // immediate attempt + 60s/3s polls
+  });
+
+  it('treats fetch errors as "not landed yet" and keeps polling', async () => {
+    let calls = 0;
+    const located = await waitForExamCommit({
+      fetchLog: () =>
+        ++calls === 1 ? Promise.reject(new Error('boom')) : Promise.resolve([examEntry]),
+      submittedAt: null,
+      sleep: () => Promise.resolve(),
+    });
+    expect(located?.entry.sha).toBe('exam-sha');
+    expect(calls).toBe(2);
+  });
+
+  it('stops when cancelled (component unmount)', async () => {
+    let calls = 0;
+    let cancelled = false;
+    const located = await waitForExamCommit({
+      fetchLog: () => {
+        calls++;
+        cancelled = true; // cancel right after the first miss
+        return Promise.resolve([]);
+      },
+      submittedAt: null,
+      sleep: () => Promise.resolve(),
+      isCancelled: () => cancelled,
+    });
+    expect(located).toBeNull();
+    expect(calls).toBe(1);
   });
 });
