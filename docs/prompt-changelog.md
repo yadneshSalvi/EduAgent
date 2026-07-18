@@ -4,6 +4,16 @@ Prompts are code (plans/03 §6.4): every material change to a skill, mode
 template, or the context envelope gets an entry here, and the golden-path E2E
 must be re-run before merging prompt changes.
 
+## 2026-07-18 — Phase 5 gate fix: topic-anchored greeting on topic threads
+
+- `buildLearnInstructions` session-start block: when the thread declares a
+  topic, the greeting/first lesson must aim at THAT topic — the digest's
+  last-session pointer may belong to a different track (observed: a
+  palette-created "Learning python" thread greeted with SQL recall because
+  the protocol privileged the last-session pointer unconditionally).
+- E2E re-verification deferred to the deploy-day smoke (greeting-path change
+  only; prompt-budget tests green).
+
 ## 2026-07-17 — Phase 4A fix: exam instructions delivered via thread/inject_items
 
 - Root cause of both pre-fix E2E failures (PROTOCOL_NOTES "Phase 4A addendum"):

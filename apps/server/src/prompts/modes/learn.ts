@@ -52,6 +52,13 @@ export function buildLearnInstructions(opts: LearnModeOptions): string {
       "their goal (the digest's Learner line) plus where you left off (the",
       "digest's last-session pointer) or, when no session log exists yet, what",
       'their first lesson will tackle from their track. Then start teaching.',
+      ...(topic
+        ? [
+            `This thread is about ${topic}: recall and teach toward ${topic},`,
+            "even when the digest's last session was a different track — mention",
+            'that other work only if it genuinely connects.',
+          ]
+        : []),
       'Never re-ask what the learner model already answers (goal, background,',
       'preferences) and never run a get-to-know-you interview or announce a',
       'calibration step — this learner has already been onboarded; being',
