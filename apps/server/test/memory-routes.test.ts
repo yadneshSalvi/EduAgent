@@ -329,10 +329,10 @@ describe('GET /api/memory/export', () => {
     expect(String(res.headers['content-disposition'])).toContain('eduagent-memory-');
     const zip = res.rawPayload;
     expect(zip.subarray(0, 2).toString('latin1')).toBe('PK'); // zip magic
-    // Listing via bsdtar (reads zip archives on macOS/Linux).
+    // unzip, not tar: GNU tar (Linux CI) cannot read zip archives; bsdtar (macOS) can.
     const zipPath = path.join(path.dirname(workspaceDir), 'export-under-test.zip');
     fs.writeFileSync(zipPath, zip);
-    const listing = execFileSync('tar', ['-tf', zipPath]).toString();
+    const listing = execFileSync('unzip', ['-Z1', zipPath]).toString();
     expect(listing).toContain('profile.md');
     expect(listing).toContain('topics/sql/mastery.yaml');
     expect(listing).not.toContain('secret-notes.md');
@@ -419,7 +419,7 @@ describe('committed examiner material (QA F1)', () => {
     fs.mkdirSync(extractDir, { recursive: true });
     const zipPath = path.join(extractDir, 'export.zip');
     fs.writeFileSync(zipPath, res.rawPayload);
-    execFileSync('tar', ['-xf', zipPath, '-C', extractDir]);
+    execFileSync('unzip', ['-oq', zipPath, '-d', extractDir]);
     const scan = (dir: string): void => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const abs = path.join(dir, entry.name);

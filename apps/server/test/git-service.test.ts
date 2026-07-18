@@ -193,7 +193,8 @@ describe('GitService (real temp repo)', () => {
     const zip = (await git.archiveZip('HEAD'))!;
     const zipPath = path.join(dir, '..', 'archive-excl.zip');
     fsSync.writeFileSync(zipPath, zip);
-    const listing = execFileSync('tar', ['-tf', zipPath]).toString();
+    // unzip, not tar: GNU tar (Linux CI) cannot read zip archives; bsdtar (macOS) can.
+    const listing = execFileSync('unzip', ['-Z1', zipPath]).toString();
     expect(listing).toContain('topics/sql/notes.md');
     expect(listing).not.toContain('.exercises');
   });
