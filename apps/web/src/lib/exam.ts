@@ -241,6 +241,21 @@ export function mergeAnswers(
   return { ...(server ?? {}), ...(local ?? {}) };
 }
 
+/**
+ * One answer applied immutably — the exam room's setState updater (QA F4).
+ * MUST be used as a FUNCTIONAL update (`setAnswers((current) => applyAnswer(…))`):
+ * building the next object from a ref/snapshot instead drops the first of two
+ * updates landing in the same tick (React batches; the snapshot only refreshes
+ * on render).
+ */
+export function applyAnswer(
+  current: ExamAnswers,
+  questionId: string,
+  value: string,
+): ExamAnswers {
+  return { ...current, [questionId]: value };
+}
+
 // ---------------------------------------------------------------------------
 // Results mapping (plans/04 §6): grades joined to questions, per-concept
 // aggregation, and the readiness sweep values for the gauge.

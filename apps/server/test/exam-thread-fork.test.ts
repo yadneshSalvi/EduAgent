@@ -3,7 +3,7 @@ import type { WsEvent } from '@eduagent/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppServerClient } from '../src/codex/index.js';
 import { createPrisma } from '../src/db.js';
-import { ThreadManager } from '../src/threads/index.js';
+import { maskExamArtifacts, ThreadManager } from '../src/threads/index.js';
 import { WorkspaceManager } from '../src/workspace/index.js';
 import { FakeAppServer, fakeSpawner, type WireMessage } from './helpers/fake-appserver.js';
 import { createTestDbUrl } from './helpers/test-db.js';
@@ -300,5 +300,107 @@ describe('instruction rotation (generate → grade)', () => {
     const injects = fake.received.filter((m) => m.method === 'thread/inject_items');
     expect(injects).toHaveLength(1);
     expect(injectedText(injects[0]!)).toContain('EXAM GENERATION');
+  });
+});
+
+describe('exam exec redaction + label masking (QA F3)', () => {
+  /** The examiner's shell traffic — every line names an answer-key artifact. */
+  const LEAKY_COMMAND =
+    "/bin/zsh -lc 'python3 tests/test_query.py solution.sql && cat .exercises/exam-abc-key/rubric.md'";
+
+  it('masks giveaway filenames but keeps the command theater', () => {
+    expect(maskExamArtifacts('python3 tests/test_query.py solution.sql')).toBe(
+      'python3 tests/test_query.py ████',
+    );
+    expect(maskExamArtifacts('cat .exercises/exam-568833e2-2860-key/rubric.md')).toBe(
+      'cat .exercises/exam-████/████',
+    );
+    expect(maskExamArtifacts('diff answers.json expected.txt')).toBe('diff ████ ████');
+    // Non-sensitive commands pass through untouched — the theater survives.
+    expect(maskExamArtifacts('sed -n 1,40p topics/sql/mastery.yaml')).toBe(
+      'sed -n 1,40p topics/sql/mastery.yaml',
+    );
+    expect(maskExamArtifacts('git add -A && git commit -m "exam(sql): graded"')).toBe(
+      'git add -A && git commit -m "exam(sql): graded"',
+    );
+  });
+
+  it('exam-thread exec rows and live activity labels never spell out key artifacts', async () => {
+    const thread = await manager.forkForExam(parent, FORK_OPTS);
+    await prisma.exam.create({
+      data: {
+        id: 'exam-abc',
+        userId: USER_ID,
+        threadId: thread.id,
+        trackSlug: 'sql-interview',
+        config: { durationMin: 30, targeting: FORK_OPTS.targeting },
+        questions: {},
+        status: 'draft',
+      },
+    });
+
+    fake.onMethod('turn/start', (msg: WireMessage) => {
+      const { threadId } = msg.params as { threadId: string };
+      counters.turn += 1;
+      const turnId = `turn-${counters.turn}`;
+      const exec = {
+        type: 'commandExecution',
+        id: `exec-${turnId}`,
+        command: LEAKY_COMMAND,
+        cwd: '/w',
+        processId: null,
+        source: 'agent',
+        status: 'completed',
+        commandActions: [],
+        aggregatedOutput: 'SECRET hidden-test output: expected 42 rows',
+        exitCode: 0,
+        durationMs: 42,
+      };
+      fake.respond(msg.id as number, { turn: { id: turnId, status: 'inProgress' } });
+      fake.notifyClient('item/started', {
+        threadId,
+        turnId,
+        item: { ...exec, status: 'inProgress', aggregatedOutput: null, exitCode: null },
+        startedAtMs: Date.now(),
+      });
+      fake.notifyClient('item/completed', {
+        threadId,
+        turnId,
+        item: exec,
+        completedAtMs: Date.now(),
+      });
+      fake.notifyClient('turn/completed', {
+        threadId,
+        turn: { id: turnId, status: 'completed', error: null },
+      });
+    });
+
+    await manager.startSystemTurn(thread, '[exam-generate]');
+
+    // Live activity labels (the generation/grading terminal card) are masked.
+    const labels = sink.records
+      .filter((r) => r.event.type === 'activity')
+      .map((r) => (r.event as { label: string }).label);
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(label).not.toContain('solution.');
+      expect(label).not.toContain('rubric');
+      expect(label).not.toContain('-key');
+      expect(label).toContain('python3 tests/test_query.py');
+    }
+
+    // The mirrored row carries exactly that masked label and nothing more.
+    const rows = await prisma.itemMirror.findMany({
+      where: { threadId: thread.id, kind: 'exec' },
+    });
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as { command: string; aggregatedOutput: string | null };
+    expect(payload.aggregatedOutput).toBeNull();
+    expect(payload.command).toBe(labels[0]);
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain('solution.sql');
+    expect(serialized).not.toContain('rubric.md');
+    expect(serialized).not.toContain('exam-abc-key');
+    expect(serialized).not.toContain('SECRET');
   });
 });

@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AGENT_GIT_AUTHOR, GitService, parseCommit } from '../src/workspace/index.js';
+import { AGENT_GIT_AUTHOR, GitService, isExaminerPath, parseCommit } from '../src/workspace/index.js';
 import { createTestDataDir } from './helpers/test-workspace.js';
 
 describe('parseCommit (plans/02 §3 grammar)', () => {
@@ -159,5 +161,52 @@ describe('GitService (real temp repo)', () => {
     await write('topics/sql/mastery.yaml', 'topic: sql\n');
     await git.commitAll('system: initialize memory');
     expect(await git.lsFiles()).toContain('topics/sql/mastery.yaml');
+  });
+
+  it('excludes committed examiner material from every learner-facing read (QA F1)', async () => {
+    await write('topics/sql/notes.md', 'joins\n');
+    const before = await git.commitAll('system: initialize memory');
+    await write('.exercises/ex-009/solution.sql', 'SELECT secret;\n');
+    await write('.exercises/ex-009/tests/test_q.py', 'assert secret\n');
+    await write('topics/sql/notes.md', 'joins\nrefined\n');
+    const sha = await git.commitAll('system(sql): author ex-009 with hidden tests');
+
+    expect(await git.lsTree('HEAD')).toEqual(['topics/sql/notes.md']);
+    expect(await git.blobAtRef('HEAD', '.exercises/ex-009/solution.sql')).toBeNull();
+    // The same path IS committed — fileAtRef (internal-only) can see it.
+    expect(await git.fileAtRef('HEAD', '.exercises/ex-009/solution.sql')).toContain('secret');
+
+    const diff = await git.diff(before, sha);
+    expect(diff).toContain('refined');
+    expect(diff).not.toContain('secret');
+    expect(await git.diffStats(before, sha)).toEqual({
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 0,
+    });
+
+    const commitDiff = await git.diffForCommit(sha);
+    expect(commitDiff.diff).toContain('refined');
+    expect(commitDiff.diff).not.toContain('secret');
+    expect(commitDiff.stats.filesChanged).toBe(1);
+
+    const zip = (await git.archiveZip('HEAD'))!;
+    const zipPath = path.join(dir, '..', 'archive-excl.zip');
+    fsSync.writeFileSync(zipPath, zip);
+    const listing = execFileSync('tar', ['-tf', zipPath]).toString();
+    expect(listing).toContain('topics/sql/notes.md');
+    expect(listing).not.toContain('.exercises');
+  });
+});
+
+describe('isExaminerPath (unit)', () => {
+  it('matches .exercises and everything under it, nothing else', () => {
+    expect(isExaminerPath('.exercises')).toBe(true);
+    expect(isExaminerPath('.exercises/ex-001/solution.sql')).toBe(true);
+    expect(isExaminerPath('.exercises\\ex-001\\tests\\t.py')).toBe(true);
+    expect(isExaminerPath('.exercises/exam-abc-key/rubric.md')).toBe(true);
+    expect(isExaminerPath('topics/sql/mastery.yaml')).toBe(false);
+    expect(isExaminerPath('.exercises-lookalike/file.md')).toBe(false);
+    expect(isExaminerPath('nested/.exercises/file.md')).toBe(false);
   });
 });

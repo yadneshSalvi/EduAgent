@@ -10,7 +10,8 @@
     "typecheck": "prisma generate && tsc --noEmit",
     "test": "vitest run",
     "db:setup": "tsx scripts/prisma-env.ts generate && tsx scripts/prisma-env.ts migrate deploy",
-    "db:migrate:dev": "tsx scripts/prisma-env.ts migrate dev"
+    "db:migrate:dev": "tsx scripts/prisma-env.ts migrate dev",
+    "seed": "tsx src/seed/index.ts"
   },
   "dependencies": {
     "@clerk/backend": "^2.33.0",

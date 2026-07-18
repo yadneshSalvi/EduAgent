@@ -4,6 +4,7 @@
  */
 export {
   GREETING_INPUT,
+  maskExamArtifacts,
   ThreadManager,
   type EnsureThreadResult,
   type ExamForkOptions,

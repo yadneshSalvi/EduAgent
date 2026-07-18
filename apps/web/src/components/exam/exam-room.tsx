@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ApiError, saveExamAnswers, submitExam } from '@/lib/api';
 import {
+  applyAnswer,
   autosaveDue,
   buildPalette,
   examDeadlineMs,
@@ -432,6 +433,11 @@ export function ExamRoom({
     return () => clearInterval(timer);
   }, [persist]);
 
+  // Local draft persists post-render (setAnswer is a pure functional update).
+  useEffect(() => {
+    saveExamAnswersLocal(exam.id, answers);
+  }, [exam.id, answers]);
+
   if (!questions || startedAt === null) return null;
 
   const deadlineMs = examDeadlineMs(startedAt, exam.durationMin);
@@ -441,9 +447,9 @@ export function ExamRoom({
 
   const setAnswer = (questionId: string, value: string) => {
     if (expiredRef.current) return;
-    const next = { ...answersRef.current, [questionId]: value };
-    setAnswers(next);
-    saveExamAnswersLocal(exam.id, next);
+    // Functional update (QA F4): two answers landing in the same tick both
+    // survive — a snapshot-based merge would drop the first.
+    setAnswers((current) => applyAnswer(current, questionId, value));
     clockRef.current.dirtySince ??= Date.now();
   };
 

@@ -310,14 +310,30 @@ export function MemoryExplorer() {
   }
 
   if (treeQuery.isError) {
+    // 401 means the SESSION ended, not that the host is down (QA F5) — say
+    // so, and route to login instead of a retry that will 401 again.
+    const signedOut =
+      treeQuery.error instanceof ApiError && treeQuery.error.code === 'unauthenticated';
     return (
       <div className="flex flex-1 items-center justify-center p-8">
-        <ErrorState
-          title="The memory explorer can't load"
-          description="The agent host didn't answer. Your memory is intact — retry hits the same endpoint."
-          detail={treeQuery.error instanceof Error ? treeQuery.error.message : undefined}
-          onRetry={() => void treeQuery.refetch()}
-        />
+        {signedOut ? (
+          <ErrorState
+            title="You're signed out"
+            description="Your session ended, so the agent host turned this request away. Your memory is intact — log back in to see it."
+            secondary={
+              <Button asChild>
+                <a href="/login">Log in</a>
+              </Button>
+            }
+          />
+        ) : (
+          <ErrorState
+            title="The memory explorer can't load"
+            description="The agent host didn't answer. Your memory is intact — retry hits the same endpoint."
+            detail={treeQuery.error instanceof Error ? treeQuery.error.message : undefined}
+            onRetry={() => void treeQuery.refetch()}
+          />
+        )}
       </div>
     );
   }

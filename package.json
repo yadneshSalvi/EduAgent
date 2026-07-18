@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:setup": "pnpm --filter @eduagent/server run db:setup",
-    "seed": "echo 'seed: seeder lands in Phase 5'"
+    "seed": "pnpm --filter @eduagent/server run seed"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.0",

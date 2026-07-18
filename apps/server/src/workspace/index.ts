@@ -6,7 +6,9 @@
  */
 export {
   AGENT_GIT_AUTHOR,
+  EXAMINER_DIR,
   GitService,
+  isExaminerPath,
   parseCommit,
   type CommitDiff,
   type GitCommitInfo,

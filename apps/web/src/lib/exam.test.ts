@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExamQuestions, ExamResult, TimelineEntry } from '@eduagent/shared';
 import type { KeyValueStore } from './workbench';
 import {
+  applyAnswer,
   autosaveDue,
   findExamCommitIndex,
   buildConceptResults,
@@ -175,6 +176,35 @@ describe('local persistence', () => {
     store.setItem('eduagent:exam-flags:e1', '"nope"');
     expect(loadExamAnswers('e1', store)).toBeNull();
     expect(loadExamFlags('e1', store)).toEqual([]);
+  });
+});
+
+describe('applyAnswer (QA F4)', () => {
+  it('applies immutably and overwrites per key', () => {
+    const start = { q1: 'a' };
+    const next = applyAnswer(start, 'q2', 'b');
+    expect(next).toEqual({ q1: 'a', q2: 'b' });
+    expect(start).toEqual({ q1: 'a' });
+    expect(applyAnswer(next, 'q1', 'edited')).toEqual({ q1: 'edited', q2: 'b' });
+  });
+
+  it('two same-tick updates both survive when queued functionally', () => {
+    // Simulates React's batched updater queue: each updater receives the
+    // PREVIOUS updater's result, exactly how the exam room now calls
+    // setAnswers((current) => applyAnswer(current, id, value)). The old
+    // snapshot-merge pattern lost q1 here — that was the bug.
+    const updaters = [
+      (current: Record<string, string>) => applyAnswer(current, 'q1', 'first'),
+      (current: Record<string, string>) => applyAnswer(current, 'q2', 'second'),
+    ];
+    const finalState = updaters.reduce((state, update) => update(state), {} as Record<string, string>);
+    expect(finalState).toEqual({ q1: 'first', q2: 'second' });
+
+    // The snapshot pattern (both built from the SAME stale object) drops q1 —
+    // documenting why the functional form is load-bearing.
+    const stale = {};
+    const fromSnapshot = [{ ...stale, q1: 'first' }, { ...stale, q2: 'second' }].at(-1)!;
+    expect(fromSnapshot).not.toHaveProperty('q1');
   });
 });
 

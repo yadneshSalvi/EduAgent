@@ -157,6 +157,20 @@ function clip(text: string, max: number): string {
   return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
 }
 
+/**
+ * Masks giveaway filenames in exam-thread activity labels (QA F3). The
+ * generation/grading terminal keeps its theater — commands still read as
+ * commands — but a label like `python3 tests/test_query.py solution.sql`
+ * or a `.exercises/exam-<id>-key/` path would tell the exam-taker where the
+ * reference solution and answer key live.
+ */
+export function maskExamArtifacts(label: string): string {
+  return label
+    .replace(/\bexam-[A-Za-z0-9-]*-key\b/g, 'exam-████')
+    .replace(/\b(?:solutions?|answers?|answer[_-]key|rubrics?|expected)\.[A-Za-z0-9_.]+/gi, '████')
+    .replace(/\b(?:solution|answer[_-]key|rubric)s?\//gi, '████/');
+}
+
 export class ThreadManager implements ExamThreadService {
   private readonly prisma: PrismaClient;
   private readonly client: AppServerClient;
@@ -754,7 +768,7 @@ export class ThreadManager implements ExamThreadService {
         this.sink.emitToThread(thread.id, { type: 'reasoning.delta', text: event.delta });
         return;
       case 'itemStarted': {
-        const activity = activityFor(event.item);
+        const activity = activityFor(event.item, thread.mode === 'exam');
         if (activity) {
           this.sink.emitToThread(thread.id, { ...activity, type: 'activity', status: 'started' });
         }
@@ -808,7 +822,7 @@ export class ThreadManager implements ExamThreadService {
   }
 
   private handleItemCompleted(thread: Thread, item: CodexItem): void {
-    const activity = activityFor(item);
+    const activity = activityFor(item, thread.mode === 'exam');
     if (activity) {
       this.sink.emitToThread(thread.id, {
         ...activity,
@@ -892,11 +906,19 @@ export class ThreadManager implements ExamThreadService {
   }
 }
 
-/** Activity-chip mapping for exec/tool/file items (plans/03 §7 `activity`). */
-function activityFor(item: CodexItem): { kind: 'exec' | 'tool'; label: string } | null {
+/**
+ * Activity-chip mapping for exec/tool/file items (plans/03 §7 `activity`).
+ * Exam threads mask answer-key filenames out of exec labels (QA F3) — the
+ * SAME masked label is what the exam exec ItemMirror row carries, so no
+ * surface ever shows more than the live chip did.
+ */
+function activityFor(item: CodexItem, exam = false): { kind: 'exec' | 'tool'; label: string } | null {
   switch (item.type) {
     case 'commandExecution':
-      return { kind: 'exec', label: clip(item.command, ACTIVITY_LABEL_MAX) };
+      return {
+        kind: 'exec',
+        label: clip(exam ? maskExamArtifacts(item.command) : item.command, ACTIVITY_LABEL_MAX),
+      };
     case 'mcpToolCall':
       return { kind: 'tool', label: clip(item.tool, ACTIVITY_LABEL_MAX) };
     case 'fileChange':
@@ -946,7 +968,8 @@ function mirrorRowFor(
         kind: 'exec',
         payload: opts.redactExecDetail
           ? {
-              command: clip(item.command, ACTIVITY_LABEL_MAX),
+              // Exactly the (masked) live activity-chip label — never more.
+              command: clip(maskExamArtifacts(item.command), ACTIVITY_LABEL_MAX),
               status: item.status,
               exitCode: item.exitCode,
               durationMs: item.durationMs,

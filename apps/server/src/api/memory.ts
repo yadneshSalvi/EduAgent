@@ -12,17 +12,21 @@ import {
   type MemoryTreeResponse,
   type TimelineEntry,
 } from '@eduagent/shared';
-import { parseCommit } from '../workspace/GitService.js';
+import { isExaminerPath, parseCommit } from '../workspace/GitService.js';
 import type { GitService } from '../workspace/GitService.js';
 import { sendError } from './http.js';
 
 /**
- * Memory explorer + time machine (plans/03 §7, plans/04 §7). THE serving
- * rule: git-tracked, COMMITTED content only. Every byte leaves via a git
+ * Memory explorer + time machine (plans/03 §7, plans/04 §7). TWO serving
+ * rules: (1) git-tracked, COMMITTED content only. Every byte leaves via a git
  * object read (`cat-file`/`ls-tree`/`diff`/`archive`) — the working tree is
- * never touched, so untracked/gitignored files (e.g. `.exercises/` hidden
- * tests that haven't been committed) can never leak, regardless of what the
- * path resolves to on disk.
+ * never touched, so untracked/gitignored files can never leak, regardless of
+ * what the path resolves to on disk. (2) examiner material — `.exercises/**`,
+ * which the teach skill COMMITS (reference solutions, hidden tests, exam
+ * answer keys) — never leaves either (QA F1): GitService excludes it from
+ * trees/diffs/blobs/archives, and the path-filtered routes below treat those
+ * paths exactly like paths that do not exist. Commits touching it stay on the
+ * timeline; only their excluded contents are invisible.
  *
  * Ownership: every route resolves the authed user and only ever opens THAT
  * user's workspace repo — there is no cross-user parameter anywhere.
@@ -172,6 +176,11 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
       if (safe === null) {
         return sendError(reply, 400, 'invalid_path', 'Not a workspace-relative file path.');
       }
+      // Examiner paths behave like paths that never existed (QA F1).
+      if (isExaminerPath(safe)) {
+        const empty: MemoryLogResponse = { commits: [] };
+        return empty;
+      }
       logPath = safe;
     }
     const limit = query.data.limit ?? 100;
@@ -212,6 +221,17 @@ export const memoryRoutes: FastifyPluginAsync = async (app) => {
       const safe = safeRelPath(query.data.path);
       if (safe === null) {
         return sendError(reply, 400, 'invalid_path', 'Not a workspace-relative file path.');
+      }
+      // Examiner paths diff like paths that never existed (QA F1) — same
+      // shape a genuinely absent path produces, so there is no oracle.
+      if (isExaminerPath(safe)) {
+        const empty: MemoryDiffResponse = {
+          from,
+          to,
+          diff: '',
+          stats: { filesChanged: 0, insertions: 0, deletions: 0 },
+        };
+        return empty;
       }
       relPath = safe;
     }

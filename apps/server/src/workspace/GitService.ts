@@ -13,6 +13,30 @@ import {
 /** All workspace commits carry this identity (plans/02 §3). */
 export const AGENT_GIT_AUTHOR = { name: 'EduAgent', email: 'agent@eduagent.local' } as const;
 
+/**
+ * Examiner material (QA F1): everything under `.exercises/` — exercise
+ * workdirs (reference solution + hidden tests, committed as evidence by the
+ * teach skill) and exam workdirs/answer keys (`.exercises/exam-*`, committed
+ * by grading). It is part of the journal, but its CONTENTS must never reach
+ * the learner: every learner-facing read on this service (lsTree, blobAtRef,
+ * diff/diffStats without an explicit path, diffForCommit, archiveZip)
+ * excludes it at the git level. Commit metadata (headlines, shas) stays
+ * visible — the timeline shows THAT an exercise was authored, never the key.
+ */
+export const EXAMINER_DIR = '.exercises';
+
+/** True when a workspace-relative path is examiner material (never served). */
+export function isExaminerPath(relPath: string): boolean {
+  const normalized = relPath.split(/[\\/]/).join('/');
+  return normalized === EXAMINER_DIR || normalized.startsWith(`${EXAMINER_DIR}/`);
+}
+
+/**
+ * Pathspec suffix that excludes examiner material from diff/show/archive.
+ * (Verified against git 2.51: all three commands honor `:(exclude)`.)
+ */
+const EXCLUDE_EXAMINER_PATHSPEC = ['--', '.', `:(exclude)${EXAMINER_DIR}`] as const;
+
 export interface GitCommitInfo {
   sha: string;
   /** Full commit message: subject line + blank line + body (when a body exists). */
@@ -165,9 +189,16 @@ export class GitService {
     return this.git.show([sha]);
   }
 
-  /** Unified diff between two refs, optionally narrowed to one path. */
+  /**
+   * Unified diff between two refs, optionally narrowed to one path. Without a
+   * path the diff excludes examiner material; with one, the CALLER must have
+   * vetted the path (memory.ts rejects examiner paths before reaching here).
+   */
   async diff(from: string, to: string, filePath?: string): Promise<string> {
-    return this.git.diff([`${from}..${to}`, ...(filePath ? ['--', filePath] : [])]);
+    return this.git.diff([
+      `${from}..${to}`,
+      ...(filePath ? ['--', filePath] : EXCLUDE_EXAMINER_PATHSPEC),
+    ]);
   }
 
   /** Numstat totals between two refs (the time-machine summary strip). */
@@ -175,15 +206,24 @@ export class GitService {
     const numstat = await this.git.diff([
       '--numstat',
       `${from}..${to}`,
-      ...(filePath ? ['--', filePath] : []),
+      ...(filePath ? ['--', filePath] : EXCLUDE_EXAMINER_PATHSPEC),
     ]);
     return parseNumstat(numstat);
   }
 
-  /** Full diff + numstat totals for a single commit (root commit included). */
+  /**
+   * Full diff + numstat totals for a single commit (root commit included),
+   * excluding examiner material — this diff is broadcast to the learner
+   * (memory.commit events, the Diff Drawer).
+   */
   async diffForCommit(sha: string): Promise<CommitDiff> {
-    const diff = await this.git.show(['--format=', '--patch', sha]);
-    const numstat = await this.git.show(['--format=', '--numstat', sha]);
+    const diff = await this.git.show(['--format=', '--patch', sha, ...EXCLUDE_EXAMINER_PATHSPEC]);
+    const numstat = await this.git.show([
+      '--format=',
+      '--numstat',
+      sha,
+      ...EXCLUDE_EXAMINER_PATHSPEC,
+    ]);
     return { diff, stats: parseNumstat(numstat) };
   }
 
@@ -222,27 +262,29 @@ export class GitService {
   }
 
   /**
-   * Workspace-relative paths of all files in a COMMIT's tree (default HEAD).
-   * The memory explorer serves committed content only (plans/03 §7) — this is
-   * the tree that matches what `blobAtRef` can serve.
+   * Workspace-relative paths of all files in a COMMIT's tree (default HEAD),
+   * minus examiner material. The memory explorer serves committed content
+   * only (plans/03 §7) — this is the tree that matches what `blobAtRef` can
+   * serve.
    */
   async lsTree(ref = 'HEAD'): Promise<string[]> {
     try {
       const out = await this.git.raw(['ls-tree', '-r', '--name-only', ref]);
-      return out.split('\n').filter(Boolean);
+      return out.split('\n').filter((p) => p !== '' && !isExaminerPath(p));
     } catch {
       return [];
     }
   }
 
   /**
-   * Blob content at `ref:path`, or null when the path is absent at that ref
-   * OR is not a regular file (directories/submodules never leak as content).
-   * Unlike `fileAtRef` (which `git show`s whatever the spec names), this
-   * verifies the object type first — the memory-explorer file endpoint uses
-   * it so a directory path can't return a tree listing.
+   * Blob content at `ref:path`, or null when the path is absent at that ref,
+   * is not a regular file (directories/submodules never leak as content), OR
+   * is examiner material. Unlike `fileAtRef` (which `git show`s whatever the
+   * spec names), this verifies the object type first — the memory-explorer
+   * file endpoint uses it so a directory path can't return a tree listing.
    */
   async blobAtRef(ref: string, filePath: string): Promise<string | null> {
+    if (isExaminerPath(filePath)) return null;
     const spec = `${ref}:${filePath.split(/[\\/]/).join('/')}`;
     try {
       const type = (await this.git.catFile(['-t', spec])).trim();
@@ -254,16 +296,17 @@ export class GitService {
   }
 
   /**
-   * Zip of the full tree at `ref` (default HEAD) via `git archive` — exactly
-   * the committed content, so gitignored/untracked files can never ride along
-   * (plans/03 §7, plans/04 §7 "Export my memory"). Null before the first
-   * commit. Spawned directly (not simple-git) because the output is binary.
+   * Zip of the tree at `ref` (default HEAD) via `git archive` — exactly the
+   * committed content minus examiner material, so neither untracked files nor
+   * answer keys can ride along (plans/03 §7, plans/04 §7 "Export my memory").
+   * Null before the first commit. Spawned directly (not simple-git) because
+   * the output is binary.
    */
   async archiveZip(ref = 'HEAD'): Promise<Buffer | null> {
     try {
       const { stdout } = await execFileAsync(
         'git',
-        ['-C', this.workspaceDir, 'archive', '--format=zip', ref],
+        ['-C', this.workspaceDir, 'archive', '--format=zip', ref, ...EXCLUDE_EXAMINER_PATHSPEC],
         { encoding: 'buffer', maxBuffer: 256 * 1024 * 1024 },
       );
       return stdout;
