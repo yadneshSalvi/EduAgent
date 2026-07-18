@@ -103,6 +103,30 @@ describe('POST /auth/demo-login (stub until Phase 5)', () => {
     const res = await app.inject({ method: 'POST', url: '/auth/demo-login', payload: {} });
     expect(res.statusCode).toBe(400);
   });
+
+  it('fails closed with 503 when ACCESS_CODE is unset (plans/08 §5)', async () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      AUTH_MODE: 'clerk',
+      DATABASE_URL: createTestDbUrl('auth-clerk-no-code'),
+      CLERK_SECRET_KEY: 'sk_test_fake_key_for_tests',
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_fake',
+      // ACCESS_CODE deliberately absent.
+    });
+    const ungated = await buildApp({ config, prisma });
+    await ungated.ready();
+    try {
+      const res = await ungated.inject({
+        method: 'POST',
+        url: '/auth/demo-login',
+        payload: { accessCode: 'anything' },
+      });
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({ error: 'demo_login_disabled' });
+    } finally {
+      await ungated.close();
+    }
+  });
 });
 
 describe('WS /ws (clerk mode)', () => {

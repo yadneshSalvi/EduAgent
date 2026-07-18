@@ -1,0 +1,14 @@
+# EduAgent ops crontab — install on the VPS as the deploy user:
+#   sudo mkdir -p /var/log/eduagent && sudo chown "$USER" /var/log/eduagent
+#   crontab -e   # paste the two jobs below (adjust /opt/eduagent if needed)
+#
+# Times are UTC (Ubuntu default). Alex's seeded timezone is
+# America/Los_Angeles, and plans/08 §6 wants the reset after 3am local:
+# 10:45 UTC = 3:45am PDT (correct for the Jul 22 – Aug 5 judging window;
+# under PST it would be 2:45am — shift to 11:45 UTC after early November).
+
+# Nightly Alex reset + health verify (+ manual warm-turn reminder in the log)
+45 10 * * * /opt/eduagent/deploy/cron/reset-alex.sh >> /var/log/eduagent/reset-alex.log 2>&1
+
+# Nightly /data backup, 30 min after the reset; keeps 7
+15 11 * * * /opt/eduagent/deploy/backup.sh >> /var/log/eduagent/backup.log 2>&1

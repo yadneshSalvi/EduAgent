@@ -10,6 +10,10 @@ loadRootEnv({ path: path.resolve(process.cwd(), '../../.env'), quiet: true });
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@eduagent/shared'],
+  // Docker builds (deploy/Dockerfile.web) set NEXT_STANDALONE=1 to get the
+  // self-contained .next/standalone server. Gated so `next start` keeps its
+  // normal behavior in local dev.
+  ...(process.env.NEXT_STANDALONE === '1' ? { output: 'standalone' as const } : {}),
   // Dev-only: `next dev` binds to localhost and silently blocks its own
   // scripts/HMR when the page is opened via 127.0.0.1, leaving the page
   // server-rendered but never hydrated (dead buttons, stuck spinners). The

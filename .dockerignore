@@ -1,0 +1,35 @@
+# Keep the Docker build context small and secret-free. Dockerfiles COPY
+# explicit paths, so this mostly guards against accidents (.env!) and bulk.
+.git
+.github
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Runtime state — NEVER ships in an image (245MB+ of workspaces/db/codex homes)
+data
+
+# Vendored in-container by apps/web/scripts/vendor-monaco.mjs during build —
+# a stale host copy (15MB, gitignored) must not ride the context
+apps/web/public/monaco
+
+# Secrets — env files stay on the host; images get env at runtime via compose
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Not needed inside images (server-entrypoint.sh IS needed — keep it)
+plans
+docs
+scripts
+deploy/*.sh
+!deploy/server-entrypoint.sh
+deploy/cron
+docker-compose*.yml
+*.log
+.DS_Store

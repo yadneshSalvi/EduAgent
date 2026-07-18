@@ -91,11 +91,21 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         'POST /auth/demo-login is only available in clerk mode (use /auth/local-login).',
       );
     }
+    // Fail closed (plans/08 §5, Phase 0 review finding): an unset ACCESS_CODE
+    // must refuse to mint sign-in tokens — never fall through as "no gate".
+    if (!config.accessCode) {
+      return sendError(
+        reply,
+        503,
+        'demo_login_disabled',
+        'Demo login is not configured on this deployment (ACCESS_CODE is unset).',
+      );
+    }
     const parsed = demoLoginRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return sendError(reply, 400, 'invalid_body', formatIssues(parsed.error.issues));
     }
-    if (config.accessCode && !constantTimeEqual(parsed.data.accessCode, config.accessCode)) {
+    if (!constantTimeEqual(parsed.data.accessCode, config.accessCode)) {
       return sendError(reply, 403, 'forbidden', 'Invalid access code.');
     }
     // Phase 5: create/link a Clerk user for the seeded "alex" row and return a

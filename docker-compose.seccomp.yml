@@ -1,0 +1,13 @@
+# plans/08 §4 decision-tree BRANCH 2: custom seccomp profile that allowlists
+# the landlock_* syscalls on top of Docker's default profile. Only needed if
+# branch 1 (default profile) fails the sandbox probe on the VPS.
+#
+# Generate the profile first (docs/DEPLOY_RUNBOOK.md, "Sandbox decision
+# tree"), then deploy with:
+#   docker compose --env-file .env.production \
+#     -f docker-compose.yml -f docker-compose.seccomp.yml up -d
+
+services:
+  server:
+    security_opt:
+      - seccomp:./deploy/seccomp/codex-landlock.json

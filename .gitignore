@@ -4,6 +4,9 @@ plans/
 # dependencies
 node_modules/
 
+# vendored monaco assets (synced from node_modules by apps/web/scripts/vendor-monaco.mjs)
+apps/web/public/monaco/
+
 # build output
 .next/
 dist/
@@ -19,6 +22,8 @@ data/
 # local env overrides (keep .env.example tracked)
 .env.local
 .env.*.local
+# VPS secrets for docker compose (keep .env.production.example tracked)
+.env.production
 
 # logs & OS noise
 *.log

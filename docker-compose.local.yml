@@ -1,0 +1,24 @@
+# Local smoke-test override (macOS/dev): plain HTTP Caddy on :8090, dummy
+# OpenAI key, AUTH_MODE=local so no Clerk account is needed. Usage:
+#   docker compose --env-file deploy/local-test.env \
+#     -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# Then: curl http://localhost:8090/healthz
+# Teardown: docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
+
+services:
+  caddy:
+    ports: !override
+      - '8090:8090'
+    environment:
+      SITE_ADDRESS: ':8090'
+
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_SERVER_URL: http://localhost:8090
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ''
+
+  server:
+    env_file:
+      - path: deploy/local-test.env
+        required: true

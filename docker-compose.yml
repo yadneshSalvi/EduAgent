@@ -1,0 +1,100 @@
+# EduAgent hosted demo (plans/08 §2): caddy → web + server, one state volume.
+#
+# ALWAYS run compose with the production env file so ${…} interpolation reads
+# it instead of the dev .env:
+#   docker compose --env-file .env.production build
+#   docker compose --env-file .env.production up -d
+# (deploy/deploy.sh does exactly this; .env.production.example documents every
+# variable — real values live only on the VPS, never in git.)
+#
+# Local smoke test (plain HTTP on :8080, dummy key, AUTH_MODE=local):
+#   docker compose --env-file deploy/local-test.env \
+#     -f docker-compose.yml -f docker-compose.local.yml up -d
+
+name: eduagent
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-eduagent.aiquantized.com}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+      - server
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+      args:
+        # Baked into the client bundle — must be the PUBLIC origin (README).
+        NEXT_PUBLIC_SERVER_URL: ${PUBLIC_ORIGIN:-https://eduagent.aiquantized.com}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    image: eduagent-web:latest
+    restart: unless-stopped
+    # Explicit env (not env_file): the web container has no business holding
+    # OPENAI_API_KEY / SESSION_SECRET / ACCESS_CODE.
+    environment:
+      NODE_ENV: production
+      AUTH_MODE: ${AUTH_MODE:-clerk}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  server:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.server
+    image: eduagent-server:latest
+    restart: unless-stopped
+    # Reap codex/git children if the node process dies mid-turn.
+    init: true
+    env_file:
+      - path: .env.production
+        required: false # absent in the local smoke test (see the override file)
+    environment:
+      NODE_ENV: production
+      DATA_DIR: /data
+      CODEX_HOME: /data/codex-home
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # The ONLY state: SQLite + per-user git workspaces + codex home/sessions.
+      - eduagent-data:/data
+    healthcheck:
+      # /healthz reports db + codex; HTTP 200 requires db:ok (health.ts).
+      # deploy.sh additionally asserts codex:ok before calling a deploy done.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # codex login + migrate + codex app-server spawn + skills/MCP boot asserts
+      start_period: 90s
+    # RELAY_PORT (8788) binds 127.0.0.1 inside this container and is never
+    # published; the MCP child talks to it over the container loopback.
+
+volumes:
+  eduagent-data:
+  caddy-data:
+  caddy-config:

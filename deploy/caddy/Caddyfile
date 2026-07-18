@@ -1,0 +1,31 @@
+# EduAgent reverse proxy (plans/08 §2): one origin, path-routed.
+#   /            → web:3000    (Next.js standalone)
+#   /api /auth /ws /healthz → server:8787 (agent host; WS upgrades proxied automatically)
+#
+# SITE_ADDRESS defaults to the public host, which makes Caddy auto-provision
+# TLS via ACME (DNS A record must already point here). The local compose
+# override sets SITE_ADDRESS=:8080 for a plain-HTTP smoke test.
+
+{$SITE_ADDRESS:eduagent.aiquantized.com} {
+	encode zstd gzip
+
+	header {
+		# TLS-only in effect (browsers ignore HSTS on plain HTTP)
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		-Server
+	}
+
+	# Upstreams are env-overridable for the plans/08 §4 branch-3 fallback
+	# (agent host native on the VM: SERVER_UPSTREAM=host.docker.internal:8787).
+	@agent path /api/* /auth/* /ws /ws/* /healthz
+	handle @agent {
+		reverse_proxy {$SERVER_UPSTREAM:server:8787}
+	}
+
+	handle {
+		reverse_proxy {$WEB_UPSTREAM:web:3000}
+	}
+}
