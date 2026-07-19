@@ -121,6 +121,11 @@ docker compose --env-file .env.production restart server   # drop dashboard cach
 ./deploy/healthcheck.sh
 ```
 
+**Post-deploy upgrade note:** after deploying a workspace-shape change such as tracks/roadmaps,
+reseed Alex immediately with `ENV_FILE=.env.production ./deploy/cron/reset-alex.sh`. The seeder
+generates the new directory layout natively; there is no runtime migration for an older demo
+workspace. This preserves Alex's linked User row and does not change the nightly reset schedule.
+
 ## 7. Sandbox decision tree (plans/08 §4) — RUN THIS BEFORE ANNOUNCING THE URL
 
 Codex's Linux sandbox is Landlock/seccomp; Docker's seccomp profile may block
@@ -272,9 +277,9 @@ Invocation: see `docker-compose.local.yml` header. All green unless noted:
   OPENAI_API_KEY | codex login --with-api-key`, dummy key) → `auth.json`
   under `/data/codex-home` → migrate deploy → boot. `/healthz` through Caddy:
   `{"ok":true,"checks":{"db":"ok","codex":"ok"}}`; boot asserts passed
-  (skills `teach`/`memory` visible, all 8 `ui_*` MCP tools listed); server
+  (skills `teach`/`memory` visible, all 9 `ui_*` MCP tools listed); server
   bound `0.0.0.0` under `NODE_ENV=production`.
-- Seeder in-container: alex 141 commits + sam, 10.1s. Alex login through
+- Seeder in-container: alex 140+ commits + sam, 10.1s. Alex login through
   Caddy (`AUTH_MODE=local`): cookie session → `/api/dashboard` returns the
   seeded payload. WS `/ws/user` upgrades through the proxy (ping→pong).
 - **Sandbox under Docker Desktop: Landlock is IMPOSSIBLE there** — the

@@ -50,7 +50,19 @@ summaries. After every learning event the agent commits with a structured, human
 message. Commits surface live in the UI as toasts with a diff drawer, and the memory explorer
 has a **time machine** — scrub between any two commits and diff your own learning.
 
-<img src="docs/assets/memory-explorer.png" width="840" alt="Memory explorer — 141 commits, time-machine scrubber, learner-model files with per-file git history" />
+<img src="docs/assets/memory-explorer.png" width="840" alt="Memory explorer — 140+ commits, time-machine scrubber, learner-model files with per-file git history" />
+
+### 🗺️ Tracks & roadmaps
+
+Every learning goal gets its own track. A short wizard can take a job description, syllabus,
+or self-described goal; a real planning turn reads that source and builds a completion-paced,
+day-by-day roadmap. The track home opens on the roadmap, groups every learn/revise/mistakes
+session beneath its day, and keeps dates as gentle hints — progress advances only when the
+learner marks the day complete.
+
+The seeded product tour shows the multi-track world directly: SQL Interview Prep is on **day
+13 of 22**, while Python DS&A is on **day 3 of 12**. Completing a day advances the roadmap and
+opens the exact `plan(...)` commit diff, so the learner can watch the plan itself evolve.
 
 ### 📚 Learn
 
@@ -96,7 +108,10 @@ a direct consumer of a real protocol capability:
 | **Exams fork your brain** | `thread/fork` of the tutor thread — the examiner inherits full pedagogical context, then diverges; `thread/inject_items` rotates it from generator to grader |
 | **Auto-grading by real execution** | Sandboxed command execution (`workspaceWrite`, network off, macOS Seatbelt / Linux Landlock) — learner code runs against hidden tests inside the sandbox, never on our server |
 | The agent *maintains* your memory | Codex file tools + `git` in the sandboxed workspace — the agent writes mastery YAML, misconception logs, SRS queues, and commits with structured messages |
-| **The agent drives our UI** | MCP — we register a stdio MCP server (`packages/mcp-ui-tools`) exposing 8 `ui_*` tools (`ui_push_exercise`, `ui_create_exam`, `ui_record_assessment`, …); the model calls them mid-turn to push exercises, quizzes, and grades into the browser |
+| **Roadmaps are agentic plans, not static forms** | A dedicated `plan` thread reads the learner's source material with Codex file tools, reasons over the constraints, and writes schema-validated `track.yaml`, `brief.md`, and `roadmap.yaml` artifacts |
+| **The plan itself is versioned** | Codex + `git` produce interleaved `plan(<track>): ...` commits for source capture and roadmap creation; every completion is another inspectable roadmap diff |
+| **Wrap → complete closes the learning loop** | The agent calls the `ui_session_wrap` MCP tool to summarize evidence; the learner confirms completion, and the host serializes the roadmap update beside the Codex turn before emitting the commit live |
+| **The agent drives our UI** | MCP — we register a stdio MCP server (`packages/mcp-ui-tools`) exposing 9 `ui_*` tools (`ui_push_exercise`, `ui_create_exam`, `ui_record_assessment`, `ui_session_wrap`, …); the model calls them mid-turn to push exercises, quizzes, wraps, and grades into the browser |
 | Pedagogy that scales beyond prompts | Skills — `teach` (Socratic method, retrieval practice) and `memory` (exact file formats + commit grammar) ship as `SKILL.md` packages the model loads on demand |
 | Live, streaming UX | The notification stream — `item/agentMessage/delta` token streaming, commentary-phase messages as latency masks, `item/commandExecution/outputDelta` activity chips, `turn/diff/updated` for the diff drawer, `thread/tokenUsage/updated` for quota |
 | A working Stop button | `turn/interrupt` |
@@ -171,7 +186,7 @@ flowchart LR
     CAP["threads · turns · forks · sandboxed exec · file tools · skills"]
     MCPC["MCP client"]
   end
-  MCPS["packages/mcp-ui-tools — stdio MCP server (8 ui_* tools)"]
+  MCPS["packages/mcp-ui-tools — stdio MCP server (9 ui_* tools)"]
   WSREPO[("data/workspaces/{user}/ — git repo: the Memory")]
   DB[("SQLite — app plumbing only")]
 
@@ -207,7 +222,7 @@ registration — and drive it over HTTP + WS only. Dashboard scores Lighthouse 9
 ### Try it now (hosted)
 
 **[DEMO_URL]** — click **"Explore as Alex"** and enter the access code from our Devpost
-testing instructions. You get the seeded learner: three weeks of history, 141 memory commits,
+testing instructions. You get the seeded learner: three weeks of history, 140+ memory commits,
 a review queue due today, and an exam one click away.
 
 ### Run it locally (~10 minutes)
@@ -229,6 +244,10 @@ pnpm db:setup               # Prisma migrations + client
 pnpm seed                   # creates Alex (3 weeks of history) and Sam (blank slate)
 pnpm dev                    # web :3000 + agent host :8787 (spawns codex app-server)
 ```
+
+> **Upgrading an existing checkout?** Run `pnpm seed` once after pulling the tracks/roadmap
+> upgrade. The workspace layout is generated natively and old flat track files are not migrated
+> at runtime.
 
 Open **http://localhost:3000**, and log in as **Alex** to see the full product with a lived-in
 memory — or as **Sam** to experience onboarding, where your memory repo is born from the first
@@ -261,7 +280,11 @@ lock-in. What the agent maintains:
 ```
 workspace/
 ├── profile.md                  # who you are: goals, background, preferences (frontmatter + prose)
-├── tracks/sql-interview.yaml   # goal-oriented curriculum: ordered concepts + weights
+├── tracks/sql-interview/
+│   ├── track.yaml              # goal-oriented curriculum: ordered concepts + weights
+│   ├── roadmap.yaml            # versioned, completion-paced day-by-day plan
+│   ├── brief.md                # distilled goal, source requirements, and constraints
+│   └── sources/                # learner-provided syllabus/JD in its original text form
 ├── topics/sql/
 │   ├── mastery.yaml            # per-concept mastery 0–1, confidence, evidence log
 │   ├── misconceptions.md       # dated [OPEN] / [RESOLVED] misconception log

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
+import { dump as yamlDump } from 'js-yaml';
 import {
   addDays,
   dashboardDataSchema,
@@ -10,9 +11,12 @@ import {
   localDate,
   masteryFileSchema,
   profileFrontmatterSchema,
+  roadmapFileSchema,
   sessionLogFrontmatterSchema,
   srsQueueFileSchema,
   trackFileSchema,
+  trackBriefFrontmatterSchema,
+  trackIntakeSchema,
   type DashboardData,
 } from '@eduagent/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -74,23 +78,153 @@ describe('seeded workspace files', () => {
     expect(model.profile).not.toBeNull();
     expect(model.profile!.frontmatter.timezone).toBe(ALEX_TIMEZONE);
     expect(model.tracks.map((t) => t.track)).toEqual(['python-dsa', 'sql-interview']);
+    expect(model.roadmaps.map((r) => r.track)).toEqual(['python-dsa', 'sql-interview']);
   });
 
-  it('profile, tracks, mastery, srs and ALL session logs parse under the shared schemas', async () => {
+  it('profile, track artifacts, mastery, srs and ALL session logs parse under shared schemas', async () => {
     const read = (rel: string) => fs.readFile(path.join(alexDir, rel), 'utf8');
     parseFrontmatterFile(profileFrontmatterSchema, await read('profile.md'));
     parseYamlFile(trackFileSchema, await read('tracks/sql-interview/track.yaml'));
     parseYamlFile(trackFileSchema, await read('tracks/python-dsa/track.yaml'));
+    parseFrontmatterFile(
+      trackBriefFrontmatterSchema,
+      await read('tracks/sql-interview/brief.md'),
+    );
+    parseFrontmatterFile(trackBriefFrontmatterSchema, await read('tracks/python-dsa/brief.md'));
     parseYamlFile(masteryFileSchema, await read('topics/sql/mastery.yaml'));
     parseYamlFile(masteryFileSchema, await read('topics/python/mastery.yaml'));
     parseYamlFile(srsQueueFileSchema, await read('srs/queue.yaml'));
     const sessionFiles = (await fs.readdir(path.join(alexDir, 'sessions'))).filter((f) =>
       f.endsWith('.md'),
     );
-    expect(sessionFiles.length).toBeGreaterThanOrEqual(15);
+    expect(sessionFiles).toHaveLength(18);
     for (const file of sessionFiles) {
-      parseFrontmatterFile(sessionLogFrontmatterSchema, await read(`sessions/${file}`));
+      const { frontmatter } = parseFrontmatterFile(
+        sessionLogFrontmatterSchema,
+        await read(`sessions/${file}`),
+      );
+      expect(frontmatter.track).toMatch(/^(sql-interview|python-dsa)$/);
+      expect(frontmatter.roadmap_day).toBeGreaterThan(0);
+      expect(frontmatter.title).toBeTruthy();
     }
+  });
+
+  it('roadmaps use live-completion serialization and land at day 13/22 and day 3/12', async () => {
+    const sqlRaw = await fs.readFile(
+      path.join(alexDir, 'tracks/sql-interview/roadmap.yaml'),
+      'utf8',
+    );
+    const pythonRaw = await fs.readFile(
+      path.join(alexDir, 'tracks/python-dsa/roadmap.yaml'),
+      'utf8',
+    );
+    const sql = parseYamlFile(roadmapFileSchema, sqlRaw);
+    const python = parseYamlFile(roadmapFileSchema, pythonRaw);
+
+    expect(sqlRaw).toBe(yamlDump(sql, { noRefs: true, lineWidth: -1 }));
+    expect(pythonRaw).toBe(yamlDump(python, { noRefs: true, lineWidth: -1 }));
+    expect(sql.schedule).toEqual({
+      study_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      minutes_per_day: 45,
+      start_date: addDays(today, -21),
+    });
+    expect(sql.days.filter((day) => day.status === 'complete')).toHaveLength(12);
+    expect(sql.days.filter((day) => day.status === 'upcoming')).toHaveLength(10);
+    expect(sql.days.find((day) => day.status === 'upcoming')?.day).toBe(13);
+    expect(python.schedule.study_days).toEqual(['mon', 'wed', 'fri']);
+    expect(python.schedule.minutes_per_day).toBe(30);
+    expect(python.days.filter((day) => day.status === 'complete')).toHaveLength(2);
+    expect(python.days.filter((day) => day.status === 'upcoming')).toHaveLength(10);
+    expect(python.days.find((day) => day.status === 'upcoming')?.day).toBe(3);
+    expect(summary.alex!.roadmaps).toEqual([
+      { slug: 'sql-interview', head: 13, total: 22, valid: true },
+      { slug: 'python-dsa', head: 3, total: 12, valid: true },
+    ]);
+  });
+
+  it('session screenplay is chronological, clubbed, and drives every completion date', async () => {
+    const sessionFiles = (await fs.readdir(path.join(alexDir, 'sessions'))).filter((file) =>
+      file.endsWith('.md'),
+    );
+    const logs = await Promise.all(
+      sessionFiles.map(async (file) => ({
+        file,
+        ...parseFrontmatterFile(
+          sessionLogFrontmatterSchema,
+          await fs.readFile(path.join(alexDir, 'sessions', file), 'utf8'),
+        ).frontmatter,
+      })),
+    );
+    const sql = parseYamlFile(
+      roadmapFileSchema,
+      await fs.readFile(path.join(alexDir, 'tracks/sql-interview/roadmap.yaml'), 'utf8'),
+    );
+    const python = parseYamlFile(
+      roadmapFileSchema,
+      await fs.readFile(path.join(alexDir, 'tracks/python-dsa/roadmap.yaml'), 'utf8'),
+    );
+    const sqlLogs = logs
+      .filter((log) => log.track === 'sql-interview')
+      .sort((a, b) => a.date.localeCompare(b.date));
+    expect(sqlLogs.map((log) => log.roadmap_day)).toEqual(
+      [...sqlLogs.map((log) => log.roadmap_day)].sort((a, b) => a! - b!),
+    );
+    expect(sqlLogs.at(-1)).toMatchObject({
+      file: `${addDays(today, -1)}-sql-left-join.md`,
+      roadmap_day: 13,
+    });
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: `${addDays(today, -10)}-python-kickoff.md`,
+          track: 'python-dsa',
+          roadmap_day: 1,
+        }),
+        expect.objectContaining({
+          file: `${addDays(today, -8)}-python-hashmaps-strings.md`,
+          track: 'python-dsa',
+          roadmap_day: 2,
+        }),
+      ]),
+    );
+    for (const roadmap of [sql, python]) {
+      for (const day of roadmap.days.filter((candidate) => candidate.status === 'complete')) {
+        const dates = logs
+          .filter((log) => log.track === roadmap.track && log.roadmap_day === day.day)
+          .map((log) => log.date)
+          .sort();
+        expect(day.completed_on, `${roadmap.track} day ${day.day}`).toBe(dates.at(-1));
+      }
+    }
+    const flavored = sqlLogs.filter((log) =>
+      ['Left joins — revisited', 'Fixing the WHERE-before-JOIN gap'].includes(log.title ?? ''),
+    );
+    expect(flavored).toHaveLength(2);
+    expect(
+      flavored.every((log) => sql.days[log.roadmap_day! - 1]?.status === 'complete'),
+    ).toBe(true);
+  });
+
+  it('track directory layout is native and the SQL source mirrors the intake', async () => {
+    const tree = await workspaces.git(summary.alex!.userId).lsTree();
+    expect(tree.filter((file) => /^tracks\/[^/]+\.yaml$/.test(file))).toEqual([]);
+    expect(tree).toEqual(
+      expect.arrayContaining([
+        'tracks/sql-interview/track.yaml',
+        'tracks/sql-interview/roadmap.yaml',
+        'tracks/sql-interview/brief.md',
+        'tracks/sql-interview/sources/job-description.md',
+        'tracks/python-dsa/track.yaml',
+        'tracks/python-dsa/roadmap.yaml',
+        'tracks/python-dsa/brief.md',
+      ]),
+    );
+    const source = await fs.readFile(
+      path.join(alexDir, 'tracks/sql-interview/sources/job-description.md'),
+      'utf8',
+    );
+    expect(source).toContain('Backend Engineer — Data Services');
+    expect(source).toContain('60-minute SQL exercise');
   });
 
   it('~35 concepts across sql + python with varied mastery and review counts', async () => {
@@ -136,17 +270,17 @@ describe('seeded workspace files', () => {
 });
 
 describe('seeded git history', () => {
-  it('130–150 commits, every one parseable under the §3 grammar', async () => {
+  it('145–170 commits, every one parseable under the §3 grammar', async () => {
     const log = await workspaces.git(summary.alex!.userId).log();
-    expect(log.length).toBeGreaterThanOrEqual(130);
-    expect(log.length).toBeLessThanOrEqual(150);
+    expect(log.length).toBeGreaterThanOrEqual(145);
+    expect(log.length).toBeLessThanOrEqual(170);
     expect(log.length).toBe(summary.alex!.commits);
     for (const info of log) {
       expect(parseCommit(info.message), `off-grammar commit: ${info.message}`).not.toBeNull();
     }
   });
 
-  it('commit types vary across learn/review/exam/misconception/profile', async () => {
+  it('commit types include the interleaved source, roadmap, and completion plan history', async () => {
     const log = await workspaces.git(summary.alex!.userId).log();
     const byType = new Map<string, number>();
     for (const info of log) {
@@ -158,6 +292,19 @@ describe('seeded git history', () => {
     expect(byType.get('exam')).toBe(1);
     expect(byType.get('misconception')).toBe(7);
     expect(byType.get('profile')).toBe(2);
+    expect(byType.get('plan')).toBe(17);
+
+    const chronological = [...log].reverse().map((info) => info.message.split('\n')[0]!);
+    expect(chronological.indexOf('plan(sql-interview): capture source material')).toBeLessThan(
+      chronological.indexOf('plan(sql-interview): create roadmap — 22 days'),
+    );
+    expect(chronological).toContain('plan(python-dsa): create roadmap — 12 days');
+    expect(
+      chronological.filter((message) => /^plan\(sql-interview\): day \d+ complete —/.test(message)),
+    ).toHaveLength(12);
+    expect(
+      chronological.filter((message) => /^plan\(python-dsa\): day \d+ complete —/.test(message)),
+    ).toHaveLength(2);
   });
 
   it('one ActivityEvent per commit, mirroring the MemoryPipeline shape', async () => {
@@ -245,6 +392,33 @@ describe('dashboard numbers (the demo video contract)', () => {
   });
 });
 
+describe('seeded Track DB rows', () => {
+  it('creates two active rows with valid intake and TrackService-compatible accents', async () => {
+    const tracks = await prisma.track.findMany({
+      where: { userId: summary.alex!.userId },
+      orderBy: { slug: 'asc' },
+    });
+    expect(tracks.map((track) => [track.slug, track.status])).toEqual([
+      ['python-dsa', 'active'],
+      ['sql-interview', 'active'],
+    ]);
+    for (const track of tracks) {
+      expect(() => trackIntakeSchema.parse(track.intake)).not.toThrow();
+      expect(track.accent).toBe(expectedAccent(track.slug));
+    }
+    const sql = tracks.find((track) => track.slug === 'sql-interview')!;
+    const intake = trackIntakeSchema.parse(sql.intake);
+    expect(intake.targetDate).toBe('2026-09-02');
+    expect(intake.sourceKind).toBe('job-description');
+    expect(intake.sourceText).toBe(
+      await fs.readFile(
+        path.join(alexDir, 'tracks/sql-interview/sources/job-description.md'),
+        'utf8',
+      ),
+    );
+  });
+});
+
 describe('seeded Exam DB row (Phase 6: History shows the mock sitting)', () => {
   it('one graded, thread-less exam whose JSON parses under the shared schemas', async () => {
     const exams = await prisma.exam.findMany({ where: { userId: summary.alex!.userId } });
@@ -320,6 +494,7 @@ describe('sam, idempotency and --force', () => {
     expect(await workspaces.git(after!.id).headSha()).toBe(headBefore);
     const events = await prisma.activityEvent.count({ where: { userId: after!.id } });
     expect(events).toBe(summary.alex!.commits);
+    expect(await prisma.track.count({ where: { userId: after!.id } })).toBe(2);
   }, 60_000);
 
   it('--user alex without --force refuses to touch an existing user', async () => {
@@ -374,3 +549,10 @@ describe('sam, idempotency and --force', () => {
     expect(summary.elapsedMs).toBeLessThan(60_000);
   });
 });
+
+function expectedAccent(slug: string): string {
+  const accents = ['violet', 'cyan', 'amber', 'rose', 'emerald', 'blue'] as const;
+  let hash = 0;
+  for (const char of slug) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return accents[hash % accents.length]!;
+}

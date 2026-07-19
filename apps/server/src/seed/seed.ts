@@ -1,10 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Prisma, PrismaClient, User } from '@prisma/client';
+import { trackIntakeSchema } from '@eduagent/shared';
 import { workspacePathFor, type AppConfig } from '../config.js';
 import { DashboardService } from '../learning/DashboardService.js';
 import { WorkspaceManager, type WorkspaceLogger } from '../workspace/index.js';
 import { ALEX_TIMEZONE, seedAlexWorkspace, type AlexSeedResult } from './alex.js';
+import { SQL_JOB_DESCRIPTION } from './content.js';
 import { buildAlexExamRow } from './exam-row.js';
 
 /**
@@ -50,6 +52,8 @@ export interface UserSeedReport {
     fading: string[];
     continueCta: string | null;
   };
+  /** Track gallery sanity: progress comes from a schema-valid workspace roadmap. */
+  roadmaps?: Array<{ slug: string; head: number; total: number; valid: boolean }>;
 }
 
 export interface SeedSummary {
@@ -160,6 +164,7 @@ async function deleteDerivedRows(prisma: PrismaClient, userId: string): Promise<
   await prisma.itemMirror.deleteMany({ where: { thread: { userId } } });
   await prisma.exam.deleteMany({ where: { userId } });
   await prisma.thread.deleteMany({ where: { userId } });
+  await prisma.track.deleteMany({ where: { userId } });
   await prisma.activityEvent.deleteMany({ where: { userId } });
 }
 
@@ -256,7 +261,19 @@ async function buildWorkspace(
     });
   }
 
+  await createAlexTrackRows(opts.prisma, user.id, result);
+
   // Post-seed sanity snapshot (the CLI prints it; the test asserts the bands).
+  const model = await workspaces.readLearnerModel(user.id);
+  base.roadmaps = ['sql-interview', 'python-dsa'].map((slug) => {
+    const roadmap = model.roadmaps.find((candidate) => candidate.track === slug);
+    return {
+      slug,
+      head: roadmap?.days.find((day) => day.status === 'upcoming')?.day ?? 0,
+      total: roadmap?.days.length ?? 0,
+      valid: roadmap !== undefined && !model.needsRepair.includes(`tracks/${slug}/roadmap.yaml`),
+    };
+  });
   const dashboard = await new DashboardService({ prisma: opts.prisma, workspaces }).get(user.id, {
     now,
   });
@@ -274,6 +291,83 @@ async function buildWorkspace(
     continueCta: dashboard.continueCta?.label ?? null,
   };
   return base;
+}
+
+async function createAlexTrackRows(
+  prisma: PrismaClient,
+  userId: string,
+  result: AlexSeedResult,
+): Promise<void> {
+  const sqlIntake = trackIntakeSchema.parse({
+    subject: 'SQL Interview Prep',
+    goalType: 'interview',
+    sourceText: SQL_JOB_DESCRIPTION,
+    sourceKind: 'job-description',
+    currentLevel: 'intermediate',
+    style: 'mix',
+    priorKnowledge: 'Strong JavaScript and frontend experience; rusty day-to-day SQL.',
+    targetDate: '2026-09-02',
+    studyDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
+    minutesPerDay: 45,
+  });
+  const pythonIntake = trackIntakeSchema.parse({
+    subject: 'Python DS&A',
+    goalType: 'interview',
+    subtopics: 'Python fluency plus common arrays, maps, pointers, trees, graphs, heaps, and DP patterns.',
+    currentLevel: 'beginner',
+    style: 'drill-first',
+    priorKnowledge: 'Comfortable solving problems in JavaScript; new to interview-style Python.',
+    totalDays: 12,
+    studyDays: ['mon', 'wed', 'fri'],
+    minutesPerDay: 30,
+  });
+  const sqlCreatedAt =
+    result.commits.find(
+      (commit) => commit.type === 'profile' && commit.headline.startsWith('onboarding'),
+    )?.instant ?? result.commits[0]!.instant;
+  const pythonCreatedAt =
+    result.commits.find(
+      (commit) => commit.type === 'profile' && commit.headline === 'add python-dsa track',
+    )?.instant ?? sqlCreatedAt;
+  const latestFor = (topic: string): Date =>
+    [...result.commits].reverse().find((commit) => commit.topic === topic)?.instant ?? sqlCreatedAt;
+
+  await prisma.track.create({
+    data: {
+      id: 'alex-track-sql-interview',
+      userId,
+      slug: 'sql-interview',
+      title: 'SQL Interview Prep',
+      goalType: 'interview',
+      status: 'active',
+      intake: sqlIntake as Prisma.InputJsonValue,
+      accent: accentFor('sql-interview'),
+      createdAt: sqlCreatedAt,
+      lastActiveAt: latestFor('sql'),
+    },
+  });
+  await prisma.track.create({
+    data: {
+      id: 'alex-track-python-dsa',
+      userId,
+      slug: 'python-dsa',
+      title: 'Python DS&A',
+      goalType: 'interview',
+      status: 'active',
+      intake: pythonIntake as Prisma.InputJsonValue,
+      accent: accentFor('python-dsa'),
+      createdAt: pythonCreatedAt,
+      lastActiveAt: latestFor('python'),
+    },
+  });
+}
+
+/** Byte-for-byte the deterministic gallery accent algorithm in TrackService. */
+function accentFor(slug: string): string {
+  const accents = ['violet', 'cyan', 'amber', 'rose', 'emerald', 'blue'] as const;
+  let hash = 0;
+  for (const char of slug) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return accents[hash % accents.length]!;
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;

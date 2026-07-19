@@ -1,6 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { addDays, effectiveMastery, readinessScore } from '@eduagent/shared';
+import {
+  addDays,
+  effectiveMastery,
+  readinessScore,
+  roadmapFileSchema,
+  type RoadmapFile,
+} from '@eduagent/shared';
+import { dump as yamlDump } from 'js-yaml';
 import type { ExamTarget } from '../learning/exam-config.js';
 import { GitService, parseCommit } from '../workspace/GitService.js';
 import { ALEX_EXAM_QUESTIONS } from './exam-row.js';
@@ -12,6 +19,7 @@ import {
   GENERIC_LEARN_BULLETS,
   GENERIC_REVIEW_BULLETS,
   MISCONCEPTIONS,
+  ROADMAPS,
   SESSIONS,
   SESSION_WRAP_HEADLINES,
   TOPICS,
@@ -19,6 +27,8 @@ import {
   type ArcStep,
   type ConceptSeed,
   type MisconceptionSeed,
+  type RoadmapDaySeed,
+  type RoadmapSeed,
   type SessionSeed,
   type TrackSeed,
 } from './content.js';
@@ -111,6 +121,15 @@ interface MiscState {
 type SeedEvent =
   | { kind: 'init'; day: number; order: number }
   | { kind: 'onboarding'; day: number; order: number }
+  | { kind: 'source'; day: number; order: number; roadmap: RoadmapSeed }
+  | { kind: 'roadmap-birth'; day: number; order: number; roadmap: RoadmapSeed }
+  | {
+      kind: 'roadmap-complete';
+      day: number;
+      order: number;
+      roadmap: RoadmapSeed;
+      roadmapDay: RoadmapDaySeed;
+    }
   | { kind: 'track-add'; day: number; order: number }
   | { kind: 'assess'; day: number; order: number; topic: string; steps: Array<{ concept: ConceptSeed; step: ArcStep }> }
   | { kind: 'exam'; day: number; order: number; steps: Array<{ concept: ConceptSeed; step: ArcStep }> }
@@ -137,6 +156,7 @@ class AlexGenerator {
   private readonly concepts = new Map<string, ConceptState>(); // "topic/id"
   private readonly miscs = new Map<string, MiscState>();
   private readonly notes = new Map<string, string[]>(); // topic → lines
+  private readonly roadmaps = new Map<string, RoadmapFile>();
   private readonly commits: SeededCommit[] = [];
   private readonly learnPicker: VariedPicker;
   private readonly reviewPicker: VariedPicker;
@@ -159,6 +179,7 @@ class AlexGenerator {
   }
 
   async run(): Promise<AlexSeedResult> {
+    this.validateScreenplay();
     const events = this.buildEvents();
     const instants = this.assignInstants(events);
     for (let i = 0; i < events.length; i++) {
@@ -167,8 +188,8 @@ class AlexGenerator {
     // Self-checks: the spec's hard numbers, enforced at generation time so a
     // content.ts edit can't silently break the demo (the test re-asserts).
     const total = this.commits.length;
-    if (total < 130 || total > 150) {
-      throw new Error(`seedAlexWorkspace: ${total} commits, expected 130–150`);
+    if (total < 145 || total > 170) {
+      throw new Error(`seedAlexWorkspace: ${total} commits, expected 145–170`);
     }
     const dueToday = [...this.concepts.values()].filter(
       (c) => c.srs !== null && c.srs.due === this.clock.today,
@@ -179,13 +200,46 @@ class AlexGenerator {
     return { commits: this.commits, exam: this.examReadiness, today: this.clock.today };
   }
 
+  /** Guard the hand-authored session/day clubbing that drives roadmap progress. */
+  private validateScreenplay(): void {
+    for (const roadmap of ROADMAPS) {
+      for (const day of roadmap.days.filter((candidate) => candidate.completedOnDay !== undefined)) {
+        const mapped = SESSIONS.filter(
+          (session) =>
+            session.mode !== 'exam' &&
+            session.track === roadmap.track &&
+            session.roadmapDay === day.day,
+        );
+        const lastSessionDay = Math.min(...mapped.map((session) => session.day));
+        if (mapped.length === 0 || lastSessionDay !== day.completedOnDay) {
+          throw new Error(
+            `seedAlexWorkspace: ${roadmap.track} day ${day.day} completion does not match its last session`,
+          );
+        }
+      }
+    }
+    const sqlDays = SESSIONS.filter(
+      (session) => session.mode !== 'exam' && session.track === 'sql-interview',
+    )
+      .sort((a, b) => b.day - a.day)
+      .map((session) => session.roadmapDay);
+    if (sqlDays.some((day, index) => index > 0 && day < sqlDays[index - 1]!)) {
+      throw new Error('seedAlexWorkspace: sql session roadmap days must be non-decreasing');
+    }
+  }
+
   // ------------------------------------------------------------ event plan
 
   private buildEvents(): SeedEvent[] {
+    const sqlRoadmap = ROADMAPS.find((roadmap) => roadmap.track === 'sql-interview')!;
+    const pythonRoadmap = ROADMAPS.find((roadmap) => roadmap.track === 'python-dsa')!;
     const events: SeedEvent[] = [
       { kind: 'init', day: 21, order: 0 },
       { kind: 'onboarding', day: 21, order: 1 },
+      { kind: 'source', day: 21, order: 1.1, roadmap: sqlRoadmap },
+      { kind: 'roadmap-birth', day: 21, order: 1.2, roadmap: sqlRoadmap },
       { kind: 'track-add', day: 10, order: 0.5 },
+      { kind: 'roadmap-birth', day: 10, order: 0.6, roadmap: pythonRoadmap },
     ];
 
     // Assessment events from the concept arcs, merging same-day groups and
@@ -252,6 +306,19 @@ class AlexGenerator {
       events.push({ kind: 'wrap', day: session.day, order: 6, session });
     }
 
+    for (const roadmap of ROADMAPS) {
+      for (const roadmapDay of roadmap.days) {
+        if (roadmapDay.completedOnDay === undefined) continue;
+        events.push({
+          kind: 'roadmap-complete',
+          day: roadmapDay.completedOnDay,
+          order: 7 + roadmapDay.day / 1_000,
+          roadmap,
+          roadmapDay,
+        });
+      }
+    }
+
     // Chronological: oldest day first, then intra-day order.
     return events.sort((a, b) => b.day - a.day || a.order - b.order);
   }
@@ -311,6 +378,35 @@ class AlexGenerator {
           ].join('\n'),
           instant,
         );
+        return;
+      }
+      case 'source': {
+        if (!event.roadmap.source) {
+          throw new Error(`seedAlexWorkspace: ${event.roadmap.track} has no source material`);
+        }
+        await this.write(
+          `tracks/${event.roadmap.track}/sources/${event.roadmap.source.filename}`,
+          event.roadmap.source.text,
+        );
+        await this.commit(`plan(${event.roadmap.track}): capture source material`, instant);
+        return;
+      }
+      case 'roadmap-birth': {
+        await this.writeBrief(event.roadmap);
+        await this.writeInitialRoadmap(event.roadmap);
+        await this.commit(
+          [
+            `plan(${event.roadmap.track}): create roadmap — ${event.roadmap.days.length} days`,
+            '',
+            `- ${event.roadmap.schedule.minutesPerDay} minutes on ${event.roadmap.schedule.studyDays.join(', ')}`,
+            `- First day: ${event.roadmap.days[0]!.title}`,
+          ].join('\n'),
+          instant,
+        );
+        return;
+      }
+      case 'roadmap-complete': {
+        await this.completeRoadmapDay(event.roadmap, event.roadmapDay, instant);
         return;
       }
       case 'track-add': {
@@ -446,8 +542,6 @@ class AlexGenerator {
     await this.writeMastery('sql', instant);
     await this.writeQueue();
     await this.writeExamRecord(day, deltas);
-    const session = SESSIONS.find((s) => s.mode === 'exam');
-    if (session) await this.writeSession(session);
     await this.commit(`exam(sql): ${headline}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`, instant);
   }
 
@@ -624,6 +718,81 @@ class AlexGenerator {
     await fs.writeFile(abs, content, 'utf8');
   }
 
+  private async writeBrief(seed: RoadmapSeed): Promise<void> {
+    await this.write(
+      `tracks/${seed.track}/brief.md`,
+      [
+        '---',
+        `track: ${seed.track}`,
+        `goal_type: ${seed.brief.goalType}`,
+        ...(seed.brief.targetDate ? [`target_date: ${seed.brief.targetDate}`] : []),
+        `source: ${seed.brief.source}`,
+        '---',
+        '',
+        seed.brief.body.trim(),
+        '',
+      ].join('\n'),
+    );
+  }
+
+  private async writeInitialRoadmap(seed: RoadmapSeed): Promise<void> {
+    const roadmap = roadmapFileSchema.parse({
+      track: seed.track,
+      created: this.clock.dayIso(seed.createdDay),
+      schedule: {
+        study_days: seed.schedule.studyDays,
+        minutes_per_day: seed.schedule.minutesPerDay,
+        start_date: this.clock.dayIso(seed.schedule.startDay),
+      },
+      days: seed.days.map((day) => ({
+        day: day.day,
+        title: day.title,
+        status: 'upcoming' as const,
+        topics: day.topics,
+        subtopics: day.subtopics,
+      })),
+    });
+    await this.writeRoadmap(roadmap);
+  }
+
+  private async completeRoadmapDay(
+    seed: RoadmapSeed,
+    spec: RoadmapDaySeed,
+    instant: Date,
+  ): Promise<void> {
+    const roadmap = this.roadmaps.get(seed.track);
+    if (!roadmap) {
+      throw new Error(`seedAlexWorkspace: ${seed.track} roadmap completed before it was created`);
+    }
+    const day = roadmap.days.find((candidate) => candidate.day === spec.day);
+    if (!day || day.status !== 'upcoming' || spec.completedOnDay === undefined) {
+      throw new Error(`seedAlexWorkspace: invalid completion for ${seed.track} day ${spec.day}`);
+    }
+    day.status = 'complete';
+    day.completed_on = this.clock.dayIso(spec.completedOnDay);
+    const reflowed = roadmap.days.filter((candidate) => candidate.status === 'upcoming').length;
+    await this.writeRoadmap(roadmap);
+    await this.commit(
+      [
+        `plan(${seed.track}): day ${spec.day} complete — ${spec.title}`,
+        '',
+        `- Covered: ${spec.subtopics.join('; ')}`,
+        ...(reflowed > 0 ? [`- Reflowed ${reflowed} days from ${day.completed_on}`] : []),
+      ].join('\n'),
+      instant,
+    );
+  }
+
+  /** Keep byte-for-byte parity with TrackService.completeDay serialization. */
+  private async writeRoadmap(roadmap: RoadmapFile): Promise<void> {
+    const valid = roadmapFileSchema.parse(roadmap);
+    this.roadmaps.set(valid.track, valid);
+    await this.write(
+      `tracks/${valid.track}/roadmap.yaml`,
+      yamlDump(valid, { noRefs: true, lineWidth: -1 }),
+    );
+  }
+
   private async writeProfile(): Promise<void> {
     await this.write(
       'profile.md',
@@ -646,10 +815,16 @@ class AlexGenerator {
   }
 
   private async writeTrack(track: TrackSeed): Promise<void> {
+    const targetDate =
+      track.targetDate ??
+      (track.targetInDays === undefined ? undefined : addDays(this.clock.today, track.targetInDays));
+    if (targetDate === undefined) {
+      throw new Error(`seedAlexWorkspace: ${track.track} has no target date`);
+    }
     const lines = [
       `track: ${track.track}`,
       `display_name: ${track.displayName}`,
-      `target_date: ${addDays(this.clock.today, track.targetInDays)}`,
+      `target_date: ${targetDate}`,
       'items:',
     ];
     for (const item of track.items) {
@@ -754,6 +929,9 @@ class AlexGenerator {
       '---',
       `date: ${date}`,
       `mode: ${session.mode}`,
+      `track: ${session.track}`,
+      `roadmap_day: ${session.roadmapDay}`,
+      `title: ${JSON.stringify(session.title)}`,
       `topics: [${session.topics.join(', ')}]`,
       `duration_estimate: ${session.duration}`,
       `concepts_touched: [${session.concepts.join(', ')}]`,

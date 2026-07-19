@@ -29,7 +29,9 @@ function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = { force: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
-    if (arg === '--force') {
+    if (arg === '--') {
+      continue; // pnpm run forwards its conventional option separator
+    } else if (arg === '--force') {
       args.force = true;
     } else if (arg === '--user') {
       const value = argv[++i];
@@ -82,6 +84,16 @@ async function main(): Promise<void> {
             `python-dsa ${d.pythonReadiness} · streak ${d.streakDays}d · ` +
             `${d.srsDueToday} due today · fading [${d.fading.join(', ')}]\n` +
             `      continue CTA: ${d.continueCta ?? '(none)'}`,
+        );
+      }
+      if (a.roadmaps) {
+        console.log(
+          `      roadmaps: ${a.roadmaps
+            .map(
+              (roadmap) =>
+                `${roadmap.slug} day ${roadmap.head}/${roadmap.total} (${roadmap.valid ? 'valid' : 'INVALID'})`,
+            )
+            .join(' · ')}`,
         );
       }
     }
