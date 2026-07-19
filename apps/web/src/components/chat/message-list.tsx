@@ -33,11 +33,12 @@ interface MessageListProps {
   onRetryTurn?: () => void;
   /** Copy shown when the thread is empty and nothing is in flight yet. */
   emptyHint?: string;
+  trackContext?: { slug: string; threadId: string };
 }
 
 const NEAR_BOTTOM_PX = 96;
 
-export function MessageList({ state, onRetryTurn, emptyHint }: MessageListProps) {
+export function MessageList({ state, onRetryTurn, emptyHint, trackContext }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
@@ -46,7 +47,13 @@ export function MessageList({ state, onRetryTurn, emptyHint }: MessageListProps)
     if (el && stickRef.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [state.items, state.streamingText, state.reasoningPreview, state.activityChips, state.turnStatus]);
+  }, [
+    state.items,
+    state.streamingText,
+    state.reasoningPreview,
+    state.activityChips,
+    state.turnStatus,
+  ]);
 
   const showEmpty =
     state.items.length === 0 &&
@@ -69,7 +76,7 @@ export function MessageList({ state, onRetryTurn, emptyHint }: MessageListProps)
     >
       <div className="mx-auto flex max-w-3xl flex-col gap-5">
         {state.items.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+          <MessageBubble key={message.id} message={message} trackContext={trackContext} />
         ))}
 
         {showEmpty ? (
@@ -100,7 +107,12 @@ export function MessageList({ state, onRetryTurn, emptyHint }: MessageListProps)
           >
             <p className="text-body-sm">{state.error.message}</p>
             {state.error.retryable && onRetryTurn ? (
-              <Button size="sm" variant="outline" onClick={onRetryTurn} className="shrink-0 gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onRetryTurn}
+                className="shrink-0 gap-1.5"
+              >
                 <RefreshCw className="size-3.5" aria-hidden />
                 Retry
               </Button>

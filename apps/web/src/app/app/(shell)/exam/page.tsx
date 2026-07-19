@@ -4,14 +4,19 @@ import { ExamSetup } from '@/components/exam/exam-setup';
 
 export const metadata: Metadata = { title: 'Exam' };
 
-export default function ExamPage() {
+export default async function ExamPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ track?: string }>;
+}) {
+  const { track } = await searchParams;
   return (
     <>
       <PageHeader
         title="Exam"
         description="Timed mock exams, forked from your memory and aimed at your weakest concepts."
       />
-      <ExamSetup />
+      <ExamSetup initialTrack={track} />
     </>
   );
 }

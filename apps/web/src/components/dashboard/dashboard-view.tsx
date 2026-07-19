@@ -116,8 +116,8 @@ function DashboardHeader({ data }: { data: DashboardData }) {
                 <Flame className="size-4" aria-hidden />
                 <span className="numeric font-semibold">{data.user.streakDays}</span>
               </span>
-              day{data.user.streakDays === 1 ? '' : 's'} streak — the tutor remembers where you
-              left off.
+              day{data.user.streakDays === 1 ? '' : 's'} streak — the tutor remembers where you left
+              off.
             </>
           ) : (
             'Your memory is live — every session commits to it.'
@@ -140,8 +140,8 @@ function DashboardHeader({ data }: { data: DashboardData }) {
   );
 }
 
-export function DashboardView() {
-  const { data, isPending, isError, error, refetch } = useDashboard();
+export function DashboardView({ trackSlug }: { trackSlug?: string }) {
+  const { data, isPending, isError, error, refetch } = useDashboard(trackSlug);
 
   const conceptTopic = useMemo(() => {
     const map = new Map<string, string>();
@@ -175,7 +175,7 @@ export function DashboardView() {
           title={`Welcome, ${data.user.displayName}.`}
           description="Every session feeds this view: a mastery heatmap, forgetting curves, readiness per track, and a live feed of commits to your memory."
           example="learn(sql): inner joins clicked — mastery 0.40 → 0.72"
-          cta={{ label: 'Start learning', href: '/app/learn' }}
+          cta={{ label: 'Start your first track', href: '/app/tracks/new' }}
         />
       </div>
     );

@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 interface TutorRoomViewProps {
   title: string;
   topicSlug: string | null;
+  badgeText?: string;
   /** Keys the per-thread workbench collapsed-state persistence. */
   threadId: string;
   stream: TurnStream;
@@ -33,6 +34,7 @@ interface TutorRoomViewProps {
   /** Extra topbar content (dev-harness controls). */
   topbarExtra?: ReactNode;
   emptyHint?: string;
+  trackContext?: { slug: string; threadId: string };
 }
 
 function ConnectionDot({ connection }: { connection: TurnStream['state']['connection'] }) {
@@ -68,6 +70,7 @@ function ConnectionDot({ connection }: { connection: TurnStream['state']['connec
 export function TutorRoomView({
   title,
   topicSlug,
+  badgeText,
   threadId,
   stream,
   onInterrupt,
@@ -75,6 +78,7 @@ export function TutorRoomView({
   onSubmitQuiz,
   topbarExtra,
   emptyHint,
+  trackContext,
 }: TutorRoomViewProps) {
   const { state, send, refetchHistory, dispatch } = stream;
   const turnInFlight = state.turnStatus !== 'idle';
@@ -88,9 +92,9 @@ export function TutorRoomView({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-surface px-4 lg:px-6">
-        {topicSlug ? (
+        {(badgeText ?? topicSlug) ? (
           <Badge variant="accent" className="font-mono lowercase">
-            {topicSlug}
+            {badgeText ?? topicSlug}
           </Badge>
         ) : null}
         <h1 className="min-w-0 truncate text-body font-medium">{title}</h1>
@@ -142,7 +146,12 @@ export function TutorRoomView({
               />
             </div>
           ) : (
-            <MessageList state={state} onRetryTurn={retryTurn} emptyHint={emptyHint} />
+            <MessageList
+              state={state}
+              onRetryTurn={retryTurn}
+              emptyHint={emptyHint}
+              trackContext={trackContext}
+            />
           )}
           {state.connection === 'not-found' || state.connection === 'failed' ? null : (
             <ChatInput

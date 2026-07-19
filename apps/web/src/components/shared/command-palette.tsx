@@ -64,7 +64,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 const GOTO_CHORDS: Record<string, { href: string; label: string }> = {
-  d: { href: '/app', label: 'Dashboard' },
+  d: { href: '/app/dashboard', label: 'Dashboard' },
   l: { href: '/app/learn', label: 'Learn' },
   r: { href: '/app/review', label: 'Review' },
   e: { href: '/app/exam', label: 'Exam' },
@@ -131,7 +131,8 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
   // Restore focus to the opener when the palette closes (05 §9).
   const openerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus();
     return () => openerRef.current?.focus();
   }, []);
@@ -171,7 +172,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
         icon: LayoutDashboard,
         keywords: 'home overview readiness',
         hint: 'g d',
-        run: () => navigate('/app'),
+        run: () => navigate('/app/dashboard'),
       },
       {
         id: 'go-learn',
@@ -401,7 +402,10 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
                       )}
                     >
                       {busyId === command.id ? (
-                        <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-hidden />
+                        <Loader2
+                          className="size-4 shrink-0 animate-spin text-primary"
+                          aria-hidden
+                        />
                       ) : (
                         <Icon
                           className={cn(

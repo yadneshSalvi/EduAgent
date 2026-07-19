@@ -5,8 +5,8 @@ import { usePathname } from 'next/navigation';
 import {
   Flame,
   GitCommitHorizontal,
-  GraduationCap,
-  LayoutDashboard,
+  Home,
+  Plus,
   RotateCcw,
   Search,
   Timer,
@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { useCommandPalette } from '@/components/shared/command-palette';
 import { useDashboard } from '@/hooks/use-dashboard';
 import { useMe } from '@/hooks/use-me';
+import { useTracks } from '@/hooks/use-tracks';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -27,8 +28,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: 'Dashboard', href: '/app', icon: LayoutDashboard, exact: true },
-  { label: 'Learn', href: '/app/learn', icon: GraduationCap },
+  { label: 'Home', href: '/app', icon: Home, exact: true },
   { label: 'Review', href: '/app/review', icon: RotateCcw },
   { label: 'Exam', href: '/app/exam', icon: Timer },
   { label: 'Memory', href: '/app/memory', icon: GitCommitHorizontal },
@@ -41,8 +41,7 @@ const NAV_ITEMS: NavItem[] = [
  * chunk so the editor shell is ready the moment the room opens.
  */
 const CHUNK_PREFETCH: Record<string, () => void> = {
-  '/app': () => void import('@/components/dashboard/decay-chart'),
-  '/app/learn': () => void import('@/lib/monaco-react'),
+  '/app/dashboard': () => void import('@/components/dashboard/decay-chart'),
   '/app/exam': () => void import('@/lib/monaco-react'),
   '/app/memory': () => void import('@/lib/monaco-react'),
 };
@@ -55,12 +54,11 @@ function warmChunks(href: string): void {
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const { data: tracks = [] } = useTracks();
   // Live due count + streak ride the shared dashboard query (invalidated on
   // every memory.commit); failures just hide the badge — never block nav.
   const { data: dashboard } = useDashboard();
-  const dueCount = dashboard
-    ? dashboard.reviewQueue.dueToday + dashboard.reviewQueue.overdue
-    : 0;
+  const dueCount = dashboard ? dashboard.reviewQueue.dueToday + dashboard.reviewQueue.overdue : 0;
 
   return (
     <aside className="sticky top-0 flex h-dvh w-16 shrink-0 flex-col border-r bg-surface lg:w-60">
@@ -69,9 +67,9 @@ export function AppSidebar() {
           href="/app"
           // Below lg only the aria-hidden "E" is visible — the label carries
           // the accessible name at every width.
-          aria-label="EduAgent — dashboard"
+          aria-label="EduAgent — home"
           className="flex h-10 items-center rounded-sm font-display text-h4 font-semibold tracking-tight"
->
+        >
           <span className="lg:hidden" aria-hidden>
             E
           </span>
@@ -79,8 +77,53 @@ export function AppSidebar() {
         </Link>
       </div>
 
-      <nav aria-label="Main" className="flex flex-1 flex-col gap-1 p-2 lg:p-3">
-        {NAV_ITEMS.map((item) => {
+      <nav
+        aria-label="Main"
+        className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2 lg:p-3"
+      >
+        <SidebarLink item={NAV_ITEMS[0]!} pathname={pathname} />
+
+        <div className="mt-2 flex flex-col gap-1">
+          <p className="hidden px-3 pb-1 font-mono text-caption lowercase text-muted-foreground lg:block">
+            tracks
+          </p>
+          {tracks.map((track) => {
+            const active = pathname.startsWith(`/app/tracks/${track.slug}`);
+            const initials = track.title
+              .split(/\s+/)
+              .slice(0, 2)
+              .map((word) => word.charAt(0))
+              .join('')
+              .toUpperCase();
+            return (
+              <Link
+                key={track.slug}
+                href={`/app/tracks/${track.slug}`}
+                aria-current={active ? 'page' : undefined}
+                title={track.title}
+                className={cn(
+                  'flex min-h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium transition-colors duration-150 lg:justify-start lg:px-3',
+                  active
+                    ? 'bg-accent-soft text-primary-legible'
+                    : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    'flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold lg:size-2.5 lg:text-[0px]',
+                    accentClass(track.accent),
+                  )}
+                >
+                  {initials || 'T'}
+                </span>
+                <span className="hidden min-w-0 flex-1 truncate lg:inline">{track.title}</span>
+              </Link>
+            );
+          })}
+        </div>
+
+        {NAV_ITEMS.slice(1).map((item) => {
           const active = item.exact
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -115,11 +158,59 @@ export function AppSidebar() {
             </Link>
           );
         })}
+
+        <Link
+          href="/app/tracks/new"
+          title="New track"
+          className="flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground lg:justify-start lg:px-3"
+        >
+          <Plus className="size-4.5 shrink-0" aria-hidden />
+          <span className="hidden lg:inline">New track</span>
+        </Link>
       </nav>
 
       <PaletteHint />
       <UserChip streakDays={dashboard?.user.streakDays ?? 0} />
     </aside>
+  );
+}
+
+function SidebarLink({ item, pathname }: { item: NavItem; pathname: string }) {
+  const active = item.exact
+    ? pathname === item.href
+    : pathname === item.href || pathname.startsWith(`${item.href}/`);
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? 'page' : undefined}
+      title={item.label}
+      onMouseEnter={() => warmChunks(item.href)}
+      onFocus={() => warmChunks(item.href)}
+      className={cn(
+        'flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium transition-colors duration-150 lg:justify-start lg:px-3',
+        active
+          ? 'bg-accent-soft text-primary-legible'
+          : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
+      )}
+    >
+      <Icon className="size-4.5 shrink-0" aria-hidden />
+      <span className="hidden flex-1 lg:inline">{item.label}</span>
+    </Link>
+  );
+}
+
+/** Track accents are server-selected names; map them onto existing theme tokens. */
+function accentClass(accent: string): string {
+  return (
+    {
+      violet: 'bg-primary text-primary-foreground',
+      cyan: 'bg-mastery-50 text-primary-foreground',
+      amber: 'bg-warn text-background',
+      rose: 'bg-danger text-primary-foreground',
+      emerald: 'bg-success text-background',
+      blue: 'bg-mastery-25 text-primary-foreground',
+    }[accent] ?? 'bg-primary text-primary-foreground'
   );
 }
 

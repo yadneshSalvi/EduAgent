@@ -192,6 +192,26 @@ describe('turnStreamReducer', () => {
     expect(state.streamingText).toBe('streaming…');
   });
 
+  it('session.wrap appends the actionable wrap message from the live event', () => {
+    const state = applyEvents(initialTurnStreamState, [
+      {
+        type: 'session.wrap',
+        threadId: 'thread-1',
+        wrap: {
+          day: 13,
+          summary_md: 'Window functions clicked.\nNext, practice ranking edge cases.',
+          concept_deltas: [{ topic: 'sql', concept: 'window-functions', from: 0.42, to: 0.68 }],
+        },
+      },
+    ]);
+    expect(state.items[0]).toMatchObject({
+      role: 'agent',
+      kind: 'wrap',
+      text: 'Window functions clicked.\nNext, practice ranking edge cases.',
+      wrap: { day: 13 },
+    });
+  });
+
   it('send appends an optimistic pending item and clears prior errors', () => {
     const errored: TurnStreamState = {
       ...initialTurnStreamState,
@@ -629,6 +649,35 @@ describe('threadItemToChatMessage', () => {
     expect(threadItemToChatMessage(item)).toEqual({ id: 'i1', role: 'agent', text: 'hello' });
   });
 
+  it('maps mirrored reasoning summaries into a full historical disclosure message', () => {
+    const item: ThreadItem = {
+      ...base,
+      kind: 'reasoning',
+      payload: { summary: ['First complete thought.', 'Second complete thought.'] },
+    };
+    expect(threadItemToChatMessage(item)).toEqual({
+      id: 'i1',
+      role: 'agent',
+      kind: 'reasoning',
+      text: 'First complete thought.\n\nSecond complete thought.',
+    });
+  });
+
+  it('maps mirrored wrap items so the action card survives reload', () => {
+    const payload = {
+      day: 13,
+      summary_md: 'A concise two-line summary.',
+      concept_deltas: [{ topic: 'sql', concept: 'ranking', from: 0.5, to: 0.7 }],
+    };
+    expect(threadItemToChatMessage({ ...base, kind: 'wrap', payload })).toEqual({
+      id: 'i1',
+      role: 'agent',
+      kind: 'wrap',
+      text: payload.summary_md,
+      wrap: payload,
+    });
+  });
+
   it('system rows prefer the caption over the raw grading instructions', () => {
     const item: ThreadItem = {
       ...base,
@@ -679,9 +728,13 @@ describe('threadItemToChatMessage', () => {
     expect(legacy!.text).not.toContain('ui_grade_exercise');
   });
 
-  it('skips non-message kinds and malformed payloads', () => {
+  it('skips unsupported kinds and malformed message or reasoning payloads', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(threadItemToChatMessage({ ...base, kind: 'exec', payload: { text: 'x' } })).toBeNull();
     expect(threadItemToChatMessage({ ...base, kind: 'message', payload: { nope: 1 } })).toBeNull();
+    expect(
+      threadItemToChatMessage({ ...base, kind: 'reasoning', payload: { nope: 1 } }),
+    ).toBeNull();
+    expect(threadItemToChatMessage({ ...base, kind: 'wrap', payload: { day: 1 } })).toBeNull();
   });
 });

@@ -54,7 +54,9 @@ function TrackOption({
       onClick={onSelect}
       className={cn(
         'flex items-center gap-3 rounded-md border px-4 py-3 text-left transition-colors duration-150',
-        selected ? 'border-primary bg-accent-soft/40' : 'hover:border-primary/50 hover:bg-surface-2',
+        selected
+          ? 'border-primary bg-accent-soft/40'
+          : 'hover:border-primary/50 hover:bg-surface-2',
       )}
     >
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -74,9 +76,13 @@ function TrackOption({
   );
 }
 
-function SetupCard({ readiness }: { readiness: Readiness[] }) {
+function SetupCard({ readiness, initialTrack }: { readiness: Readiness[]; initialTrack?: string }) {
   const router = useRouter();
-  const [trackSlug, setTrackSlug] = useState(readiness[0]?.track ?? '');
+  const [trackSlug, setTrackSlug] = useState(
+    readiness.some((entry) => entry.track === initialTrack)
+      ? initialTrack!
+      : (readiness[0]?.track ?? ''),
+  );
   const [durationMin, setDurationMin] = useState<number>(30);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -104,8 +110,8 @@ function SetupCard({ readiness }: { readiness: Readiness[] }) {
       <div className="flex flex-col gap-1">
         <h2 className="font-display text-h3 font-medium">Fork your memory into an exam.</h2>
         <p className="text-body-sm text-muted-foreground">
-          The examiner inherits everything EduAgent knows about you, then writes a timed exam
-          aimed at exactly what you&apos;re weakest at.
+          The examiner inherits everything EduAgent knows about you, then writes a timed exam aimed
+          at exactly what you&apos;re weakest at.
         </p>
       </div>
 
@@ -177,7 +183,12 @@ function SetupCard({ readiness }: { readiness: Readiness[] }) {
         </div>
       ) : null}
 
-      <Button size="lg" className="gap-2" disabled={creating || !selected} onClick={() => void create()}>
+      <Button
+        size="lg"
+        className="gap-2"
+        disabled={creating || !selected}
+        onClick={() => void create()}
+      >
         {creating ? (
           <Loader2 className="size-4 animate-spin" aria-hidden />
         ) : (
@@ -266,7 +277,7 @@ function History() {
   );
 }
 
-export function ExamSetup() {
+export function ExamSetup({ initialTrack }: { initialTrack?: string }) {
   const dashboardQuery = useDashboard();
 
   if (dashboardQuery.isPending) {
@@ -309,7 +320,7 @@ export function ExamSetup() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-8">
-      <SetupCard readiness={readiness} />
+      <SetupCard readiness={readiness} initialTrack={initialTrack} />
       <History />
     </div>
   );

@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import {
   apiErrorSchema,
+  completeTrackDaySchema,
   createExamRequestSchema,
   createExamResponseSchema,
+  createTrackResponseSchema,
+  createTrackSessionSchema,
   createThreadRequestSchema,
   createThreadResponseSchema,
   dashboardDataSchema,
@@ -27,9 +30,21 @@ import {
   submitExerciseRequestSchema,
   submitExerciseResponseSchema,
   submitQuizRequestSchema,
+  threadSummarySchema,
   threadItemsResponseSchema,
+  trackDetailSchema,
+  trackIntakeSchema,
+  trackIntentSchema,
+  trackSessionsSchema,
+  trackSummarySchema,
   type CreateExamRequest,
   type CreateExamResponse,
+  type CreateTrackResponse,
+  type TrackIntake,
+  type TrackDetail,
+  type TrackSessions,
+  type TrackSummary,
+  type ThreadSummary,
   type CreateThreadRequest,
   type CreateThreadResponse,
   type DashboardData,
@@ -57,6 +72,13 @@ import {
   type ThreadItemsResponse,
   type ThreadMode,
 } from '@eduagent/shared';
+
+type TrackIntent = z.infer<typeof trackIntentSchema>;
+const listTracksResponseSchema = z.object({ tracks: z.array(trackSummarySchema) });
+const generateTrackResponseSchema = z.object({
+  ok: z.literal(true),
+  planThreadId: z.string().min(1),
+});
 
 /**
  * Typed fetch wrapper for the agent host (plans/03 §7). Base URL comes from
@@ -248,6 +270,66 @@ export function createThread(request: CreateThreadRequest): Promise<CreateThread
   });
 }
 
+// ---------------------------------------------------------------------------
+// Learning tracks
+// ---------------------------------------------------------------------------
+
+export function listTracks(signal?: AbortSignal): Promise<{ tracks: TrackSummary[] }> {
+  return apiFetch('/api/tracks', { schema: listTracksResponseSchema, signal });
+}
+
+export function createTrack(request: TrackIntake): Promise<CreateTrackResponse> {
+  return apiFetch('/api/tracks', {
+    method: 'POST',
+    body: trackIntakeSchema.parse(request),
+    schema: createTrackResponseSchema,
+  });
+}
+
+export function getTrackDetail(slug: string, signal?: AbortSignal): Promise<TrackDetail> {
+  return apiFetch(`/api/tracks/${encodeURIComponent(slug)}`, {
+    schema: trackDetailSchema,
+    signal,
+  });
+}
+
+export function retryTrackGeneration(slug: string): Promise<{ ok: true; planThreadId: string }> {
+  return apiFetch(`/api/tracks/${encodeURIComponent(slug)}/generate`, {
+    method: 'POST',
+    schema: generateTrackResponseSchema,
+  });
+}
+
+export function getTrackSessions(slug: string, signal?: AbortSignal): Promise<TrackSessions> {
+  return apiFetch(`/api/tracks/${encodeURIComponent(slug)}/sessions`, {
+    schema: trackSessionsSchema,
+    signal,
+  });
+}
+
+export function createTrackSession(
+  slug: string,
+  request: { day: number; intent: TrackIntent },
+): Promise<ThreadSummary> {
+  return apiFetch(`/api/tracks/${encodeURIComponent(slug)}/sessions`, {
+    method: 'POST',
+    body: createTrackSessionSchema.parse(request),
+    schema: threadSummarySchema,
+  });
+}
+
+export function completeTrackDay(
+  slug: string,
+  day: number,
+  request: { threadId?: string } = {},
+): Promise<TrackDetail> {
+  return apiFetch(`/api/tracks/${encodeURIComponent(slug)}/days/${day}/complete`, {
+    method: 'POST',
+    body: completeTrackDaySchema.parse(request),
+    schema: trackDetailSchema,
+  });
+}
+
 export function getThreadItems(
   threadId: string,
   signal?: AbortSignal,
@@ -355,8 +437,9 @@ export function submitExam(examId: string, answers: ExamAnswers): Promise<OkResp
 // Dashboard · review · memory explorer (Phase 3)
 // ---------------------------------------------------------------------------
 
-export function getDashboard(signal?: AbortSignal): Promise<DashboardData> {
-  return apiFetch('/api/dashboard', { schema: dashboardDataSchema, signal });
+export function getDashboard(track?: string, signal?: AbortSignal): Promise<DashboardData> {
+  const query = track ? `?${new URLSearchParams({ track })}` : '';
+  return apiFetch(`/api/dashboard${query}`, { schema: dashboardDataSchema, signal });
 }
 
 export function getReviewQueue(signal?: AbortSignal): Promise<ReviewQueueResponse> {

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 
 /**
@@ -7,23 +8,40 @@ import { AnimatePresence, motion } from 'motion/react';
  * thinks; collapses (Micro class) when the first real token lands — the
  * reducer clears the text on message.delta, AnimatePresence does the exit.
  */
-const MAX_VISIBLE = 140;
+const NEAR_BOTTOM_PX = 32;
 
 export function ReasoningPreview({ text }: { text: string }) {
-  const shown = text.length > MAX_VISIBLE ? `…${text.slice(-MAX_VISIBLE)}` : text;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const followsBottomRef = useRef(true);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container && followsBottomRef.current) container.scrollTop = container.scrollHeight;
+  }, [text]);
+
   return (
     <AnimatePresence initial={false}>
       {text !== '' ? (
-        <motion.p
+        <motion.div
+          ref={containerRef}
           key="reasoning"
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
           exit={{ opacity: 0, height: 0 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
-          className="truncate font-serif italic text-body-sm text-muted-foreground"
+          onScroll={() => {
+            const container = containerRef.current;
+            if (!container) return;
+            followsBottomRef.current =
+              container.scrollHeight - container.scrollTop - container.clientHeight <
+              NEAR_BOTTOM_PX;
+          }}
+          className="max-h-48 overflow-y-auto"
         >
-          {shown}
-        </motion.p>
+          <p className="whitespace-pre-wrap break-words font-serif italic text-body-sm text-muted-foreground">
+            {text}
+          </p>
+        </motion.div>
       ) : null}
     </AnimatePresence>
   );

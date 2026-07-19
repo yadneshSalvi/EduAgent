@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { slugSchema } from '@eduagent/shared';
-import { TutorRoom } from '@/components/learn/tutor-room';
+import { LegacyOrTrackRoom } from '@/components/learn/legacy-or-track-room';
 
 export const metadata: Metadata = { title: 'Tutor room' };
 
@@ -12,5 +12,5 @@ export default async function TutorRoomPage({ params }: { params: Promise<{ thre
     notFound();
   }
 
-  return <TutorRoom threadId={threadId} />;
+  return <LegacyOrTrackRoom threadId={threadId} />;
 }

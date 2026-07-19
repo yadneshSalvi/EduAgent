@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   exercisePayloadSchema,
   quizPayloadSchema,
+  sessionWrapPayloadSchema,
   wsEventSchema,
   type ArtifactPayload,
   type AssessmentPayload,
@@ -27,13 +28,33 @@ import { ApiError, getExercise, getThreadItems, threadSocketUrl } from '@/lib/ap
  * frames are console.warn'd and ignored, never rendered.
  */
 
-export interface ChatMessage {
+interface StandardChatMessage {
   id: string;
   role: 'user' | 'agent' | 'system';
   text: string;
+  kind?: 'message';
   /** Optimistic local send, not yet mirrored by the server. */
   pending?: boolean;
 }
+
+export interface ReasoningChatMessage {
+  id: string;
+  role: 'agent';
+  kind: 'reasoning';
+  text: string;
+  pending?: never;
+}
+
+export interface SessionWrapChatMessage {
+  id: string;
+  role: 'agent';
+  kind: 'wrap';
+  text: string;
+  wrap: z.infer<typeof sessionWrapPayloadSchema>;
+  pending?: never;
+}
+
+export type ChatMessage = StandardChatMessage | ReasoningChatMessage | SessionWrapChatMessage;
 
 export interface ActivityChip {
   id: string;
@@ -209,9 +230,17 @@ function mergeHistory(existing: ChatMessage[], server: ChatMessage[]): ChatMessa
   const serverUserTexts = new Set(
     server.filter((item) => item.role === 'user').map((item) => item.text),
   );
+  const serverWraps = new Set(
+    server
+      .filter((item): item is SessionWrapChatMessage => item.kind === 'wrap')
+      .map((item) => `${item.wrap.day}:${item.wrap.summary_md}`),
+  );
   const extras = existing.filter((item) => {
     if (serverIds.has(item.id)) return false;
     if (item.pending && serverUserTexts.has(item.text)) return false;
+    if (item.kind === 'wrap' && serverWraps.has(`${item.wrap.day}:${item.wrap.summary_md}`)) {
+      return false;
+    }
     return true;
   });
   return [...server, ...extras];
@@ -382,6 +411,17 @@ function applyEvent(state: TurnStreamState, event: WsEvent): TurnStreamState {
     case 'memory.commit':
       return { ...state, commits: [...state.commits, event.commit] };
 
+    case 'session.wrap': {
+      const item: SessionWrapChatMessage = {
+        id: `wrap-${event.threadId}-${event.wrap.day}-${state.items.length}`,
+        role: 'agent',
+        kind: 'wrap',
+        text: event.wrap.summary_md,
+        wrap: event.wrap,
+      };
+      return { ...state, items: upsertItem(state.items, item), turnStatus: 'awaiting' };
+    }
+
     case 'turn.completed':
       return {
         ...flushStreaming(state),
@@ -409,7 +449,6 @@ function applyEvent(state: TurnStreamState, event: WsEvent): TurnStreamState {
     case 'exam.created':
     case 'exam.graded':
     // Track events get their real handlers in the tracks frontend slice.
-    case 'session.wrap':
     case 'track.updated':
       return state;
   }
@@ -547,6 +586,7 @@ export function turnStreamReducer(
  * chat shows instead of the full internal instruction text.
  */
 const messagePayloadSchema = z.object({ text: z.string(), caption: z.string().optional() });
+const reasoningPayloadSchema = z.object({ summary: z.array(z.string()) });
 
 /** The auto-greeting trigger row (ThreadManager.GREETING_INPUT) — the one
  * caption-less system row that is safe to pass through (message-bubble maps
@@ -559,6 +599,33 @@ const GREETING_INPUT = '[session-start]';
 const SYSTEM_FALLBACK_CAPTION = 'The tutor ran a task in the background.';
 
 export function threadItemToChatMessage(item: ThreadItem): ChatMessage | null {
+  if (item.kind === 'reasoning') {
+    const parsed = reasoningPayloadSchema.safeParse(item.payload);
+    if (!parsed.success) {
+      console.warn('reasoning item payload missing {summary}, skipping', item.id);
+      return null;
+    }
+    return {
+      id: item.id,
+      role: 'agent',
+      kind: 'reasoning',
+      text: parsed.data.summary.join('\n\n'),
+    };
+  }
+  if (item.kind === 'wrap') {
+    const parsed = sessionWrapPayloadSchema.safeParse(item.payload);
+    if (!parsed.success) {
+      console.warn('wrap item payload failed sessionWrapPayloadSchema, skipping', item.id);
+      return null;
+    }
+    return {
+      id: item.id,
+      role: 'agent',
+      kind: 'wrap',
+      text: parsed.data.summary_md,
+      wrap: parsed.data,
+    };
+  }
   if (item.kind !== 'message') return null;
   const parsed = messagePayloadSchema.safeParse(item.payload);
   if (!parsed.success) {

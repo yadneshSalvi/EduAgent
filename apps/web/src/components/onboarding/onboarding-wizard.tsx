@@ -48,10 +48,16 @@ function deriveStep(stream: TurnStream['state']): {
   return { step: Math.min(answers, 2), birthCommit: null };
 }
 
-function StepChips({ current }: { current: number }) {
+export function StepChips({
+  current,
+  steps = STEPS,
+}: {
+  current: number;
+  steps?: readonly string[];
+}) {
   return (
     <ol className="flex items-center gap-2" aria-label="Onboarding steps">
-      {STEPS.map((step, index) => (
+      {steps.map((step, index) => (
         <li
           key={step}
           aria-current={index === current ? 'step' : undefined}
@@ -141,23 +147,29 @@ function MemoryBornFinale({
   );
 }
 
-function WizardChrome({
+export function WizardChrome({
   step,
   children,
+  steps = STEPS,
+  headerLinkLabel = 'Skip for now →',
+  headerLinkHref = '/app',
 }: {
   step: number;
   children: React.ReactNode;
+  steps?: readonly string[];
+  headerLinkLabel?: string;
+  headerLinkHref?: string;
 }) {
   return (
     <div className="flex h-dvh flex-col bg-background">
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b px-6">
         <span className="font-display text-h4 font-semibold tracking-tight">EduAgent</span>
-        <StepChips current={step} />
+        <StepChips current={step} steps={steps} />
         <Link
-          href="/app"
+          href={headerLinkHref}
           className="rounded-sm text-caption text-muted-foreground transition-colors duration-150 hover:text-foreground"
         >
-          Skip for now →
+          {headerLinkLabel}
         </Link>
       </header>
       {children}

@@ -2,13 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Download,
-  GitCommitHorizontal,
-  History,
-  Loader2,
-  Undo2,
-} from 'lucide-react';
+import { Download, GitCommitHorizontal, History, Loader2, Undo2 } from 'lucide-react';
 import type { MemoryCommitType, TimelineEntry } from '@eduagent/shared';
 import { EmptyState } from '@/components/shared/empty-state';
 import { ErrorState } from '@/components/shared/error-state';
@@ -26,6 +20,7 @@ import { formatRelativeTime, formatShortDate } from '@/lib/dashboard-data';
 import { summarizeRange } from '@/lib/time-machine';
 import { languageForPath, parseUnifiedDiff } from '@/lib/unified-diff';
 import { cn } from '@/lib/utils';
+import { useTracks } from '@/hooks/use-tracks';
 import { FileTree, firstFilePath } from './file-tree';
 import { FileViewer } from './file-viewer';
 import { MonacoFileDiff } from './monaco-file-diff';
@@ -118,10 +113,7 @@ function DiffSummaryStrip({
   fromDate: string;
   toDate: string;
 }) {
-  const summary = useMemo(
-    () => summarizeRange(commits, fromSha, toSha),
-    [commits, fromSha, toSha],
-  );
+  const summary = useMemo(() => summarizeRange(commits, fromSha, toSha), [commits, fromSha, toSha]);
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-surface-2/40 px-4 py-2.5">
       <p className="font-serif text-body-sm italic text-muted-foreground">
@@ -252,6 +244,7 @@ function RangeDiff({
 }
 
 export function MemoryExplorer() {
+  const tracks = useTracks();
   const treeQuery = useQuery({
     queryKey: ['memory', 'tree'],
     queryFn: ({ signal }) => getMemoryTree(signal),
@@ -264,7 +257,16 @@ export function MemoryExplorer() {
     retry: false,
   });
 
-  const newestFirst = useMemo(() => logQuery.data?.commits ?? [], [logQuery.data]);
+  const [trackFilter, setTrackFilter] = useState('all');
+  const matchesTrack = (entry: TimelineEntry) => {
+    if (trackFilter === 'all') return true;
+    const track = tracks.data?.find((candidate) => candidate.slug === trackFilter);
+    return track ? entry.topic === track.slug || track.topicSlugs.includes(entry.topic) : true;
+  };
+  const newestFirst = useMemo(
+    () => (logQuery.data?.commits ?? []).filter(matchesTrack),
+    [logQuery.data, trackFilter, tracks.data],
+  );
   const oldestFirst = useMemo(() => [...newestFirst].reverse(), [newestFirst]);
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -293,7 +295,8 @@ export function MemoryExplorer() {
     enabled: path !== null,
     retry: false,
   });
-  const railCommits = path !== null ? (fileLogQuery.data?.commits ?? []) : newestFirst;
+  const railCommits =
+    path !== null ? (fileLogQuery.data?.commits ?? []).filter(matchesTrack) : newestFirst;
 
   // Pre-onboarding (404 no_memory): the designed empty state, not a crash.
   if (treeQuery.error instanceof ApiError && treeQuery.error.status === 404) {
@@ -304,7 +307,7 @@ export function MemoryExplorer() {
           title="Your memory hasn't been born yet."
           description="Once you finish onboarding, the tutor keeps versioned files about you here — profile, mastery, misconceptions — every change a readable git commit."
           example="git log --oneline memory/"
-          cta={{ label: 'Start onboarding', href: '/app/learn' }}
+          cta={{ label: 'Start your first track', href: '/app/tracks/new' }}
         />
       </div>
     );
@@ -362,6 +365,34 @@ export function MemoryExplorer() {
           </a>
         </Button>
       </header>
+
+      {(tracks.data?.length ?? 0) > 0 ? (
+        <div
+          className="flex flex-wrap gap-2 border-b bg-surface px-6 py-2"
+          aria-label="Filter memory commits by track"
+        >
+          {['all', ...(tracks.data ?? []).map((track) => track.slug)].map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              aria-pressed={trackFilter === filter}
+              onClick={() => {
+                setTrackFilter(filter);
+                setRange(null);
+                setViewRef('HEAD');
+              }}
+              className={cn(
+                'rounded-full border px-3 py-1 font-mono text-caption transition-colors duration-150',
+                trackFilter === filter
+                  ? 'border-primary/50 bg-accent-soft text-primary-legible'
+                  : 'text-muted-foreground hover:border-primary/50 hover:text-foreground',
+              )}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {oldestFirst.length > 1 ? (
         <div className="border-b bg-surface px-6 py-3">
@@ -443,7 +474,11 @@ export function MemoryExplorer() {
                 ) : fileQuery.isPending ? (
                   <div className="animate-pulse space-y-3 p-6">
                     {Array.from({ length: 10 }, (_, i) => (
-                      <div key={i} className="h-4 rounded-sm bg-surface-2" style={{ width: `${90 - (i % 4) * 15}%` }} />
+                      <div
+                        key={i}
+                        className="h-4 rounded-sm bg-surface-2"
+                        style={{ width: `${90 - (i % 4) * 15}%` }}
+                      />
                     ))}
                   </div>
                 ) : fileQuery.isError ? (

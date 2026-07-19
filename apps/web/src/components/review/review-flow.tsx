@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { QuizFlow } from '@/components/workbench/quiz-flow';
 import { useDashboard } from '@/hooks/use-dashboard';
+import { useTracks } from '@/hooks/use-tracks';
 import { useTurnStream } from '@/hooks/use-turn-stream';
 import { ApiError, getReviewQueue, interruptThread, startReview, submitQuiz } from '@/lib/api';
 import { daysUntil, formatShortDate, reviewEstimateMinutes } from '@/lib/dashboard-data';
@@ -52,6 +53,7 @@ function todayIso(): string {
 // ---------------------------------------------------------------------------
 
 function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
+  const tracks = useTracks();
   const queueQuery = useQuery({
     queryKey: ['review', 'queue'],
     queryFn: ({ signal }) => getReviewQueue(signal),
@@ -59,6 +61,7 @@ function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [nothingDue, setNothingDue] = useState(false);
+  const [trackFilter, setTrackFilter] = useState<string>('all');
 
   if (queueQuery.isPending) {
     return (
@@ -81,10 +84,18 @@ function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
   }
 
   const queue = queueQuery.data;
-  const due = queue.dueToday + queue.overdue;
+  const conceptTrack = new Map<string, string>();
+  for (const track of tracks.data ?? []) {
+    for (const concept of track.conceptSlugs) conceptTrack.set(concept, track.slug);
+  }
+  const visibleItems =
+    trackFilter === 'all'
+      ? queue.items
+      : queue.items.filter((item) => conceptTrack.get(item.concept) === trackFilter);
+  const due = trackFilter === 'all' ? queue.dueToday + queue.overdue : visibleItems.length;
   const today = todayIso();
 
-  if (due === 0 || nothingDue) {
+  if (queue.dueToday + queue.overdue === 0 || nothingDue) {
     return (
       <EmptyState
         icon={RotateCcw}
@@ -118,21 +129,41 @@ function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
+      {(tracks.data?.length ?? 0) > 0 ? (
+        <div className="flex flex-wrap gap-2" aria-label="Filter review queue by track">
+          {['all', ...(tracks.data ?? []).map((track) => track.slug)].map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              aria-pressed={trackFilter === filter}
+              onClick={() => setTrackFilter(filter)}
+              className={cn(
+                'rounded-full border px-3 py-1 font-mono text-caption transition-colors duration-150',
+                trackFilter === filter
+                  ? 'border-primary/50 bg-accent-soft text-primary-legible'
+                  : 'text-muted-foreground hover:border-primary/50 hover:text-foreground',
+              )}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <section className="flex flex-col gap-4 rounded-lg border bg-surface p-6">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="font-display text-h3 font-medium">
             <span className="numeric">{due}</span> due · est.{' '}
             <span className="numeric">{reviewEstimateMinutes(due)}</span> min
           </h2>
-          {queue.overdue > 0 ? (
+          {trackFilter === 'all' && queue.overdue > 0 ? (
             <Badge variant="warn" className="numeric">
               {queue.overdue} overdue
             </Badge>
           ) : null}
         </div>
         <p className="text-body-sm text-muted-foreground">
-          The tutor reads your memory and quizzes each concept from a fresh angle — never the
-          same flashcard twice.
+          The tutor reads your memory and quizzes each concept from a fresh angle — never the same
+          flashcard twice.
         </p>
         <Button size="lg" className="gap-2" disabled={starting} onClick={() => void start()}>
           {starting ? (
@@ -150,8 +181,9 @@ function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
       </section>
 
       <ul className="flex flex-col gap-2">
-        {queue.items.map((item) => {
+        {visibleItems.map((item) => {
           const overdueDays = -daysUntil(item.due, today);
+          const itemTrack = conceptTrack.get(item.concept);
           return (
             <li
               key={`${item.topic}/${item.concept}`}
@@ -161,6 +193,11 @@ function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
               <span className="rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-caption text-muted-foreground">
                 {item.topic}
               </span>
+              {itemTrack ? (
+                <span className="rounded-sm bg-accent-soft px-1.5 py-0.5 font-mono text-caption text-primary-legible">
+                  {itemTrack}
+                </span>
+              ) : null}
               <span className="flex-1" />
               <span
                 className={cn(
@@ -168,9 +205,7 @@ function QueueView({ onStarted }: { onStarted: (threadId: string) => void }) {
                   overdueDays > 0 ? 'text-warn' : 'text-muted-foreground',
                 )}
               >
-                {overdueDays > 0
-                  ? `${overdueDays}d overdue`
-                  : `due ${formatShortDate(item.due)}`}
+                {overdueDays > 0 ? `${overdueDays}d overdue` : `due ${formatShortDate(item.due)}`}
               </span>
             </li>
           );
@@ -263,7 +298,7 @@ function SessionSummary({ stats, onDone }: { stats: ReviewSessionStats; onDone: 
       <div className="mt-1 flex flex-wrap gap-3">
         <Button asChild className="gap-1.5">
           <Link href="/app">
-            Back to dashboard
+            Back to tracks
             <ArrowRight className="size-3.5" aria-hidden />
           </Link>
         </Button>
@@ -419,7 +454,12 @@ function ReviewSession({ threadId, onExit }: { threadId: string; onExit: () => v
               >
                 <p className="text-body-sm">{state.error.message}</p>
                 {state.error.retryable ? (
-                  <Button size="sm" variant="outline" onClick={retryTurn} className="shrink-0 gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={retryTurn}
+                    className="shrink-0 gap-1.5"
+                  >
                     <RefreshCw className="size-3.5" aria-hidden />
                     Retry
                   </Button>

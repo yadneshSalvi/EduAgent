@@ -53,9 +53,8 @@ export function LocalProfilePicker() {
     setError(null);
     try {
       const me = await localLogin(parsed.data);
-      // A learner without a committed profile.md goes to the interview wizard
-      // (plans/04 §8); its "Skip for now" link keeps this from ever looping.
-      router.push(me.onboarded ? safeRedirectTarget() : '/app/onboarding');
+      // The first track is onboarding: its generation turn bootstraps profile.md.
+      router.push(me.onboarded ? safeRedirectTarget() : '/app/tracks/new');
     } catch (err) {
       setBusyHandle(null);
       if (err instanceof ApiConnectionError) {
@@ -135,8 +134,8 @@ export function LocalProfilePicker() {
               </Button>
             </div>
             <p className="text-caption text-muted-foreground">
-              A new handle starts a fresh learner with an empty memory — pick your existing
-              profile above to continue where you left off.
+              A new handle starts a fresh learner with an empty memory — pick your existing profile
+              above to continue where you left off.
             </p>
           </form>
         ) : (

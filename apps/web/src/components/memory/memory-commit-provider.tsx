@@ -51,10 +51,7 @@ export function useUserSocketEvents(handler: (event: WsEvent) => void): void {
   const { subscribeUserEvents } = useMemoryCommits();
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
-  useEffect(
-    () => subscribeUserEvents((event) => handlerRef.current(event)),
-    [subscribeUserEvents],
-  );
+  useEffect(() => subscribeUserEvents((event) => handlerRef.current(event)), [subscribeUserEvents]);
 }
 
 const MAX_TOASTS = 3;
@@ -87,6 +84,7 @@ export function MemoryCommitProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['memory'] });
       void queryClient.invalidateQueries({ queryKey: ['review', 'queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['tracks'] });
     },
     [queryClient],
   );

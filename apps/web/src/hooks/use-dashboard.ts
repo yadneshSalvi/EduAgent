@@ -9,10 +9,10 @@ import { getDashboard } from '@/lib/api';
  * dashboard page and the sidebar (due badge, streak). Invalidated on every
  * memory.commit by MemoryCommitProvider.
  */
-export function useDashboard() {
+export function useDashboard(track?: string) {
   return useQuery<DashboardData>({
-    queryKey: ['dashboard'],
-    queryFn: ({ signal }) => getDashboard(signal),
+    queryKey: track ? ['dashboard', 'track', track] : ['dashboard'],
+    queryFn: ({ signal }) => getDashboard(track, signal),
     staleTime: 30_000,
     retry: 1,
     refetchOnWindowFocus: false,

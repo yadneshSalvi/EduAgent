@@ -5,12 +5,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { GitCommitHorizontal, X } from 'lucide-react';
 import type { MemoryCommit } from '@eduagent/shared';
 import { useTickedNumber } from '@/components/shared/number-ticker';
-import {
-  commitBadge,
-  commitToastDurationMs,
-  formatDiffStats,
-  shortSha,
-} from '@/lib/commit-format';
+import { commitBadge, commitToastDurationMs, formatDiffStats, shortSha } from '@/lib/commit-format';
 import { formatMastery, masteryColor } from '@/lib/mastery';
 
 /**
@@ -22,7 +17,7 @@ import { formatMastery, masteryColor } from '@/lib/mastery';
 const AUTO_DISMISS_MS = commitToastDurationMs(process.env.NEXT_PUBLIC_COMMIT_TOAST_MS);
 const MAX_DELTA_CHIPS = 3;
 
-function DeltaTickChip({
+export function DeltaTickChip({
   concept,
   from,
   to,
