@@ -1,11 +1,15 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  ChevronRight,
   Flame,
   GitCommitHorizontal,
   Home,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RotateCcw,
   Search,
@@ -13,11 +17,20 @@ import {
   UserRound,
   type LucideIcon,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { useCommandPalette } from '@/components/shared/command-palette';
+import { SessionTree } from '@/components/tracks/session-tree';
+import { Badge } from '@/components/ui/badge';
 import { useDashboard } from '@/hooks/use-dashboard';
 import { useMe } from '@/hooks/use-me';
 import { useTracks } from '@/hooks/use-tracks';
+import {
+  ensureOpenKey,
+  readSidebarCollapsed,
+  readSidebarTracksOpen,
+  toggleOpenKey,
+  writeSidebarCollapsed,
+  writeSidebarTracksOpen,
+} from '@/lib/sidebar-state';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -52,130 +65,239 @@ function warmChunks(href: string): void {
   CHUNK_PREFETCH[href]?.();
 }
 
+function trackSlugFromPath(pathname: string): string | null {
+  const slug = /^\/app\/tracks\/([^/]+)/.exec(pathname)?.[1] ?? null;
+  return slug === 'new' ? null : slug;
+}
+
+/** The application shell's sole sidebar, including the nested track session tree. */
 export function AppSidebar() {
   const pathname = usePathname();
+  const activeTrackSlug = trackSlugFromPath(pathname);
+  const mountedActiveSlug = useRef(activeTrackSlug);
   const { data: tracks = [] } = useTracks();
-  // Live due count + streak ride the shared dashboard query (invalidated on
-  // every memory.commit); failures just hide the badge — never block nav.
   const { data: dashboard } = useDashboard();
   const dueCount = dashboard ? dashboard.reviewQueue.dueToday + dashboard.reviewQueue.overdue : 0;
+  const [collapsed, setCollapsed] = useState(false);
+  const [openTracks, setOpenTracks] = useState<Set<string>>(() =>
+    ensureOpenKey(new Set(), activeTrackSlug),
+  );
+  const [storageReady, setStorageReady] = useState(false);
+  const expanded = !collapsed;
+
+  // Preferences load after mount so server and first-client markup agree.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setCollapsed(readSidebarCollapsed(window.localStorage));
+    setOpenTracks(
+      ensureOpenKey(readSidebarTracksOpen(window.localStorage), mountedActiveSlug.current),
+    );
+    setStorageReady(true);
+  }, []);
+
+  // Navigating into a track opens it once; the learner can still close it.
+  useEffect(() => {
+    setOpenTracks((current) => ensureOpenKey(current, activeTrackSlug));
+  }, [activeTrackSlug]);
+
+  useEffect(() => {
+    if (!storageReady || typeof window === 'undefined') return;
+    writeSidebarCollapsed(window.localStorage, collapsed);
+  }, [collapsed, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady || typeof window === 'undefined') return;
+    writeSidebarTracksOpen(window.localStorage, openTracks);
+  }, [openTracks, storageReady]);
 
   return (
-    <aside className="sticky top-0 flex h-dvh w-16 shrink-0 flex-col border-r bg-surface lg:w-60">
-      <div className="flex h-16 items-center justify-center border-b px-2 lg:justify-start lg:px-6">
+    <aside
+      className={cn(
+        'sticky top-0 flex h-dvh w-16 shrink-0 flex-col border-r bg-surface',
+        'transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none',
+        expanded ? 'lg:w-60' : 'lg:w-16',
+      )}
+    >
+      <div
+        className={cn(
+          'flex h-16 shrink-0 items-center justify-center border-b px-2',
+          expanded ? 'lg:justify-start lg:px-3' : 'lg:px-0',
+        )}
+      >
         <Link
           href="/app"
-          // Below lg only the aria-hidden "E" is visible — the label carries
-          // the accessible name at every width.
           aria-label="EduAgent — home"
-          className="flex h-10 items-center rounded-sm font-display text-h4 font-semibold tracking-tight"
+          className={cn(
+            'flex h-10 items-center justify-center rounded-sm font-display text-h4 font-semibold tracking-tight',
+            expanded ? 'lg:min-w-0 lg:flex-1 lg:justify-start lg:px-3' : 'lg:w-6',
+          )}
         >
-          <span className="lg:hidden" aria-hidden>
+          <span className={cn('lg:hidden')} aria-hidden>
             E
           </span>
-          <span className="hidden lg:inline">EduAgent</span>
+          {expanded ? (
+            <span className={cn('hidden truncate lg:inline')}>EduAgent</span>
+          ) : (
+            <span className={cn('hidden lg:inline')} aria-hidden>
+              E
+            </span>
+          )}
         </Link>
+        <button
+          type="button"
+          aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          aria-expanded={expanded}
+          aria-controls="app-sidebar-nav"
+          onClick={() => setCollapsed((current) => !current)}
+          className={cn(
+            'hidden size-10 shrink-0 items-center justify-center rounded-md text-muted-foreground lg:flex',
+            'transition-colors duration-150 hover:bg-surface-2 hover:text-foreground',
+          )}
+        >
+          {expanded ? (
+            <PanelLeftClose className={cn('size-4')} aria-hidden />
+          ) : (
+            <PanelLeftOpen className={cn('size-4')} aria-hidden />
+          )}
+        </button>
       </div>
 
       <nav
+        id="app-sidebar-nav"
         aria-label="Main"
-        className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2 lg:p-3"
+        className={cn(
+          'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2',
+          expanded && 'lg:p-3',
+        )}
       >
-        <SidebarLink item={NAV_ITEMS[0]!} pathname={pathname} />
+        <SidebarLink item={NAV_ITEMS[0]!} pathname={pathname} expanded={expanded} />
 
-        <div className="mt-2 flex flex-col gap-1">
-          <p className="hidden px-3 pb-1 font-mono text-caption lowercase text-muted-foreground lg:block">
-            tracks
-          </p>
+        <div className={cn('mt-2 flex flex-col gap-1')}>
+          {expanded ? (
+            <p
+              className={cn(
+                'hidden px-3 pb-1 font-mono text-caption lowercase text-muted-foreground lg:block',
+              )}
+            >
+              tracks
+            </p>
+          ) : null}
           {tracks.map((track) => {
             const active = pathname.startsWith(`/app/tracks/${track.slug}`);
+            const trackExpanded = openTracks.has(track.slug);
             const initials = track.title
               .split(/\s+/)
               .slice(0, 2)
               .map((word) => word.charAt(0))
               .join('')
               .toUpperCase();
+            const treeId = `sidebar-track-${track.slug}`;
             return (
-              <Link
-                key={track.slug}
-                href={`/app/tracks/${track.slug}`}
-                aria-current={active ? 'page' : undefined}
-                title={track.title}
-                className={cn(
-                  'flex min-h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium transition-colors duration-150 lg:justify-start lg:px-3',
-                  active
-                    ? 'bg-accent-soft text-primary-legible'
-                    : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
-                )}
-              >
-                <span
-                  aria-hidden
+              <div key={track.slug} className={cn('flex min-w-0 flex-col')}>
+                <div
                   className={cn(
-                    'flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold lg:size-2.5 lg:text-[0px]',
-                    accentClass(track.accent),
+                    'flex min-w-0 rounded-md transition-colors duration-150',
+                    active
+                      ? 'bg-accent-soft text-primary-legible'
+                      : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
                   )}
                 >
-                  {initials || 'T'}
-                </span>
-                <span className="hidden min-w-0 flex-1 truncate lg:inline">{track.title}</span>
-              </Link>
+                  <Link
+                    href={`/app/tracks/${track.slug}`}
+                    aria-current={active ? 'page' : undefined}
+                    title={track.title}
+                    className={cn(
+                      'flex min-h-10 min-w-0 flex-1 items-center justify-center gap-3 text-body-sm font-medium',
+                      expanded && 'lg:justify-start lg:pl-3',
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold',
+                        expanded && 'lg:size-2.5 lg:text-[0px]',
+                        accentClass(track.accent),
+                      )}
+                    >
+                      {initials || 'T'}
+                    </span>
+                    {expanded ? (
+                      <span className={cn('hidden min-w-0 flex-1 truncate lg:inline')}>
+                        {track.title}
+                      </span>
+                    ) : null}
+                  </Link>
+                  {expanded ? (
+                    <button
+                      type="button"
+                      aria-label={`${trackExpanded ? 'Collapse' : 'Expand'} ${track.title}`}
+                      aria-expanded={trackExpanded}
+                      aria-controls={treeId}
+                      onClick={() => setOpenTracks((current) => toggleOpenKey(current, track.slug))}
+                      className={cn(
+                        'hidden size-10 shrink-0 items-center justify-center rounded-md lg:flex',
+                        'transition-colors duration-150 hover:bg-surface-2',
+                      )}
+                    >
+                      <ChevronRight
+                        className={cn(
+                          'size-3.5 transition-transform duration-150 motion-reduce:transition-none',
+                          trackExpanded && 'rotate-90',
+                        )}
+                        aria-hidden
+                      />
+                    </button>
+                  ) : null}
+                </div>
+                <div id={treeId} className={cn('hidden min-w-0 lg:block')}>
+                  <SessionTree slug={track.slug} expanded={expanded && trackExpanded} />
+                </div>
+              </div>
             );
           })}
         </div>
 
-        {NAV_ITEMS.slice(1).map((item) => {
-          const active = item.exact
-            ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
-          const badge = item.href === '/app/review' ? dueCount : 0;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? 'page' : undefined}
-              title={item.label}
-              onMouseEnter={() => warmChunks(item.href)}
-              onFocus={() => warmChunks(item.href)}
-              className={cn(
-                'flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium transition-colors duration-150 lg:justify-start lg:px-3',
-                active
-                  ? 'bg-accent-soft text-primary-legible'
-                  : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
-              )}
-            >
-              <Icon className="size-4.5 shrink-0" aria-hidden />
-              <span className="hidden flex-1 lg:inline">{item.label}</span>
-              {badge > 0 ? (
-                <Badge
-                  variant="accent"
-                  className="hidden numeric lg:inline-flex"
-                  aria-label={`${badge} reviews due`}
-                >
-                  {badge}
-                </Badge>
-              ) : null}
-            </Link>
-          );
-        })}
+        {NAV_ITEMS.slice(1).map((item) => (
+          <SidebarLink
+            key={item.href}
+            item={item}
+            pathname={pathname}
+            expanded={expanded}
+            badge={item.href === '/app/review' ? dueCount : 0}
+          />
+        ))}
 
         <Link
           href="/app/tracks/new"
           title="New track"
-          className="flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground lg:justify-start lg:px-3"
+          className={cn(
+            'flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium',
+            'text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground',
+            expanded && 'lg:justify-start lg:px-3',
+          )}
         >
-          <Plus className="size-4.5 shrink-0" aria-hidden />
-          <span className="hidden lg:inline">New track</span>
+          <Plus className={cn('size-4.5 shrink-0')} aria-hidden />
+          {expanded ? <span className={cn('hidden lg:inline')}>New track</span> : null}
         </Link>
       </nav>
 
-      <PaletteHint />
-      <UserChip streakDays={dashboard?.user.streakDays ?? 0} />
+      <PaletteHint expanded={expanded} />
+      <UserChip streakDays={dashboard?.user.streakDays ?? 0} expanded={expanded} />
     </aside>
   );
 }
 
-function SidebarLink({ item, pathname }: { item: NavItem; pathname: string }) {
+function SidebarLink({
+  item,
+  pathname,
+  expanded,
+  badge = 0,
+}: {
+  item: NavItem;
+  pathname: string;
+  expanded: boolean;
+  badge?: number;
+}) {
   const active = item.exact
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -188,14 +310,25 @@ function SidebarLink({ item, pathname }: { item: NavItem; pathname: string }) {
       onMouseEnter={() => warmChunks(item.href)}
       onFocus={() => warmChunks(item.href)}
       className={cn(
-        'flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium transition-colors duration-150 lg:justify-start lg:px-3',
+        'flex h-10 items-center justify-center gap-3 rounded-md px-0 text-body-sm font-medium',
+        'transition-colors duration-150',
+        expanded && 'lg:justify-start lg:px-3',
         active
           ? 'bg-accent-soft text-primary-legible'
           : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
       )}
     >
-      <Icon className="size-4.5 shrink-0" aria-hidden />
-      <span className="hidden flex-1 lg:inline">{item.label}</span>
+      <Icon className={cn('size-4.5 shrink-0')} aria-hidden />
+      {expanded ? <span className={cn('hidden flex-1 lg:inline')}>{item.label}</span> : null}
+      {expanded && badge > 0 ? (
+        <Badge
+          variant="accent"
+          className={cn('numeric hidden lg:inline-flex')}
+          aria-label={`${badge} reviews due`}
+        >
+          {badge}
+        </Badge>
+      ) : null}
     </Link>
   );
 }
@@ -215,25 +348,37 @@ function accentClass(accent: string): string {
 }
 
 /** Advertises the ⌘K layer (plans/04 §11) — judges are developers. */
-function PaletteHint() {
+function PaletteHint({ expanded }: { expanded: boolean }) {
   const palette = useCommandPalette();
   if (!palette) return null;
   return (
-    <div className="px-2 pb-1 lg:px-3">
+    <div className={cn('px-2 pb-1', expanded && 'lg:px-3')}>
       <button
         type="button"
         onClick={palette.open}
         title="Command palette"
-        className="flex h-10 w-full items-center justify-center gap-3 rounded-md text-muted-foreground transition-colors duration-150 hover:bg-surface-2 hover:text-foreground lg:justify-start lg:px-3"
+        className={cn(
+          'flex h-10 w-full items-center justify-center gap-3 rounded-md text-muted-foreground',
+          'transition-colors duration-150 hover:bg-surface-2 hover:text-foreground',
+          expanded && 'lg:justify-start lg:px-3',
+        )}
       >
-        <Search className="size-4.5 shrink-0" aria-hidden />
-        <span className="hidden flex-1 text-left text-body-sm font-medium lg:inline">Commands</span>
-        <kbd
-          aria-hidden
-          className="hidden rounded-sm border bg-surface-2 px-1.5 py-0.5 font-mono text-caption lg:inline"
-        >
-          ⌘K
-        </kbd>
+        <Search className={cn('size-4.5 shrink-0')} aria-hidden />
+        {expanded ? (
+          <>
+            <span className={cn('hidden flex-1 text-left text-body-sm font-medium lg:inline')}>
+              Commands
+            </span>
+            <kbd
+              aria-hidden
+              className={cn(
+                'hidden rounded-sm border bg-surface-2 px-1.5 py-0.5 font-mono text-caption lg:inline',
+              )}
+            >
+              ⌘K
+            </kbd>
+          </>
+        ) : null}
       </button>
     </div>
   );
@@ -243,16 +388,20 @@ function PaletteHint() {
  * The user chip: identity from GET /auth/me, streak from the dashboard
  * payload. 401 / unreachable host render the signed-out treatment.
  */
-function UserChip({ streakDays }: { streakDays: number }) {
+function UserChip({ streakDays, expanded }: { streakDays: number; expanded: boolean }) {
   const { data: me, isPending } = useMe();
   const name = me?.displayName ?? null;
 
   return (
-    <div className="border-t p-2 lg:p-3">
+    <div className={cn('border-t p-2', expanded && 'lg:p-3')}>
       <Link
         href="/app/settings"
         title="Settings"
-        className="flex items-center justify-center gap-3 rounded-md p-2 transition-colors duration-150 hover:bg-surface-2 lg:justify-start"
+        className={cn(
+          'flex items-center justify-center gap-3 rounded-md p-2 transition-colors duration-150',
+          'hover:bg-surface-2',
+          expanded && 'lg:justify-start',
+        )}
       >
         <span
           aria-hidden
@@ -263,25 +412,27 @@ function UserChip({ streakDays }: { streakDays: number }) {
               : 'bg-surface-2 text-muted-foreground',
           )}
         >
-          {name ? name.charAt(0).toUpperCase() : <UserRound className="size-4" />}
+          {name ? name.charAt(0).toUpperCase() : <UserRound className={cn('size-4')} />}
         </span>
-        <span className="hidden min-w-0 flex-1 flex-col lg:flex">
-          <span className={cn('truncate text-body-sm font-medium', isPending && 'opacity-0')}>
-            {name ?? 'Not signed in'}
-          </span>
-          {me ? (
-            <span className="truncate font-mono text-caption text-muted-foreground">
-              @{me.handle}
+        {expanded ? (
+          <span className={cn('hidden min-w-0 flex-1 flex-col lg:flex')}>
+            <span className={cn('truncate text-body-sm font-medium', isPending && 'opacity-0')}>
+              {name ?? 'Not signed in'}
             </span>
-          ) : null}
-        </span>
-        {streakDays > 0 ? (
+            {me ? (
+              <span className={cn('truncate font-mono text-caption text-muted-foreground')}>
+                @{me.handle}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {expanded && streakDays > 0 ? (
           <span
-            className="hidden items-center gap-1 text-warn lg:flex"
+            className={cn('hidden items-center gap-1 text-warn lg:flex')}
             title={`${streakDays}-day streak`}
           >
-            <Flame className="size-4" aria-hidden />
-            <span className="numeric text-caption font-semibold">{streakDays}</span>
+            <Flame className={cn('size-4')} aria-hidden />
+            <span className={cn('numeric text-caption font-semibold')}>{streakDays}</span>
           </span>
         ) : null}
       </Link>

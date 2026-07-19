@@ -5,7 +5,7 @@ import { getTrackDetail, getTrackSessions, listTracks } from '@/lib/api';
 
 /**
  * Track queries share the `['tracks']` root so one memory.commit refreshes
- * gallery summaries, roadmap derivations, and the persistent session rail.
+ * gallery summaries, roadmap derivations, and the persistent session tree.
  */
 export function useTracks() {
   return useQuery({
@@ -24,9 +24,10 @@ export function useTrackDetail(slug: string, enabled = true) {
   });
 }
 
-export function useTrackSessions(slug: string) {
+export function useTrackSessions(slug: string, enabled = true) {
   return useQuery({
     queryKey: ['tracks', slug, 'sessions'],
     queryFn: ({ signal }) => getTrackSessions(slug, signal),
+    enabled,
   });
 }
