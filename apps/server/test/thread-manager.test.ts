@@ -5,7 +5,7 @@ import type { WsEvent } from '@eduagent/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AppServerClient } from '../src/codex/index.js';
 import { createPrisma } from '../src/db.js';
-import { GREETING_INPUT, ThreadManager } from '../src/threads/index.js';
+import { ARCHIVED_SESSION_MESSAGE, GREETING_INPUT, ThreadManager } from '../src/threads/index.js';
 import { WorkspaceManager } from '../src/workspace/index.js';
 import type { AppConfig } from '../src/config.js';
 import { FakeAppServer, fakeSpawner, type WireMessage } from './helpers/fake-appserver.js';
@@ -374,6 +374,49 @@ describe('startTurn', () => {
       },
     });
   }
+
+  it('rejects archived-session chat with a terminal error and no resume or turn', async () => {
+    const thread = await prisma.thread.create({
+      data: {
+        userId: USER_ID,
+        codexThreadId: 'seed-alex-s01',
+        mode: 'learn',
+        topicSlug: 'sql',
+        title: 'SELECT fundamentals',
+        status: 'archived',
+        sessionToken: 'seed-1',
+      },
+    });
+    const before = fake.received.length;
+
+    await manager.startTurn(thread, 'Can we keep going?');
+
+    expect(fake.received).toHaveLength(before);
+    expect(sink.records).toEqual([
+      {
+        target: 'thread',
+        id: thread.id,
+        event: {
+          type: 'turn.error',
+          threadId: thread.id,
+          message: ARCHIVED_SESSION_MESSAGE,
+          retryable: false,
+        },
+      },
+      {
+        target: 'user',
+        id: USER_ID,
+        event: {
+          type: 'turn.error',
+          threadId: thread.id,
+          message: ARCHIVED_SESSION_MESSAGE,
+          retryable: false,
+        },
+      },
+    ]);
+    expect(await prisma.itemMirror.count({ where: { threadId: thread.id } })).toBe(0);
+    expect(memory.calls).toEqual([]);
+  });
 
   it('resumes an unknown thread before the turn, then mirrors + streams it', async () => {
     scriptCannedTurns(fake, counters);

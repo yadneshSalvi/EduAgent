@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AppConfig } from '../src/config.js';
 import { DashboardService } from '../src/learning/index.js';
 import { ALEX_TIMEZONE } from '../src/seed/alex.js';
+import { SESSIONS } from '../src/seed/content.js';
 import { seedDemo, type SeedSummary } from '../src/seed/seed.js';
 import { parseCommit } from '../src/workspace/GitService.js';
 import { parseFrontmatterFile, parseYamlFile } from '../src/workspace/learner-files.js';
@@ -86,10 +87,7 @@ describe('seeded workspace files', () => {
     parseFrontmatterFile(profileFrontmatterSchema, await read('profile.md'));
     parseYamlFile(trackFileSchema, await read('tracks/sql-interview/track.yaml'));
     parseYamlFile(trackFileSchema, await read('tracks/python-dsa/track.yaml'));
-    parseFrontmatterFile(
-      trackBriefFrontmatterSchema,
-      await read('tracks/sql-interview/brief.md'),
-    );
+    parseFrontmatterFile(trackBriefFrontmatterSchema, await read('tracks/sql-interview/brief.md'));
     parseFrontmatterFile(trackBriefFrontmatterSchema, await read('tracks/python-dsa/brief.md'));
     parseYamlFile(masteryFileSchema, await read('topics/sql/mastery.yaml'));
     parseYamlFile(masteryFileSchema, await read('topics/python/mastery.yaml'));
@@ -200,9 +198,9 @@ describe('seeded workspace files', () => {
       ['Left joins — revisited', 'Fixing the WHERE-before-JOIN gap'].includes(log.title ?? ''),
     );
     expect(flavored).toHaveLength(2);
-    expect(
-      flavored.every((log) => sql.days[log.roadmap_day! - 1]?.status === 'complete'),
-    ).toBe(true);
+    expect(flavored.every((log) => sql.days[log.roadmap_day! - 1]?.status === 'complete')).toBe(
+      true,
+    );
   });
 
   it('track directory layout is native and the SQL source mirrors the intake', async () => {
@@ -317,6 +315,107 @@ describe('seeded git history', () => {
     expect(meta.sha).toBeTruthy();
     expect(meta.headline).toBeTruthy();
     expect(meta.stats).toBeTruthy();
+  });
+});
+
+describe('seeded session transcripts', () => {
+  it('keeps every authored screenplay within the turn and tutor-length bounds', () => {
+    expect(SESSIONS).toHaveLength(19);
+    for (const session of SESSIONS) {
+      expect(session.transcript.length, session.slug).toBeGreaterThanOrEqual(5);
+      expect(session.transcript.length, session.slug).toBeLessThanOrEqual(9);
+      expect(session.transcript[0]?.role, session.slug).toBe('agent');
+      expect(session.transcript.at(-1)?.role, session.slug).toBe('agent');
+      for (const turn of session.transcript.filter((candidate) => candidate.role === 'agent')) {
+        expect(
+          turn.md.trim().split(/\s+/).length,
+          `${session.slug}: ${turn.md}`,
+        ).toBeLessThanOrEqual(120);
+      }
+    }
+  });
+
+  it('creates deterministic archived threads with ordered conversation-only history', async () => {
+    const threads = await prisma.thread.findMany({
+      where: { userId: summary.alex!.userId },
+      orderBy: { id: 'asc' },
+    });
+    expect(threads).toHaveLength(SESSIONS.length);
+    expect(threads.map((thread) => thread.id)).toEqual(
+      SESSIONS.map((_, index) => `seed-alex-s${String(index + 1).padStart(2, '0')}`),
+    );
+    const events = await prisma.activityEvent.findMany({
+      where: { userId: summary.alex!.userId, kind: 'commit' },
+    });
+
+    for (let index = 0; index < threads.length; index++) {
+      const thread = threads[index]!;
+      const session = SESSIONS[index]!;
+      expect(thread).toMatchObject({
+        codexThreadId: thread.id,
+        status: 'archived',
+        mode: session.mode === 'review' ? 'review' : 'learn',
+        topicSlug: session.topics[0],
+        trackSlug: session.track,
+        roadmapDay: session.roadmapDay,
+        title: session.title,
+        sessionToken: `seed-${index + 1}`,
+      });
+      expect(thread.intent).toBe(
+        session.slug === 'review-sprint'
+          ? 'revise'
+          : session.slug === 'sql-join-filtering'
+            ? 'mistakes'
+            : 'teach',
+      );
+      expect(thread.lastActiveAt.getTime() - thread.createdAt.getTime()).toBe(
+        Number.parseInt(session.duration, 10) * 60_000,
+      );
+
+      const items = await prisma.itemMirror.findMany({
+        where: { threadId: thread.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(items).toHaveLength(session.transcript.length + 2);
+      expect(items[0]).toMatchObject({
+        role: 'system',
+        kind: 'message',
+        payload: { text: '[session-start]' },
+      });
+      expect(items.slice(1, -1).map((item) => [item.role, item.kind, item.payload])).toEqual(
+        session.transcript.map((turn) => [turn.role, 'message', { text: turn.md }]),
+      );
+      expect(new Set(items.map((item) => item.kind))).toEqual(new Set(['message', 'wrap']));
+      for (let itemIndex = 1; itemIndex < items.length; itemIndex++) {
+        expect(items[itemIndex]!.createdAt.getTime()).toBeGreaterThan(
+          items[itemIndex - 1]!.createdAt.getTime(),
+        );
+      }
+      expect(items[0]!.createdAt).toEqual(thread.createdAt);
+      expect(items.at(-1)!.createdAt).toEqual(thread.lastActiveAt);
+
+      const wrap = items.at(-1)!;
+      expect(wrap).toMatchObject({ role: 'agent', kind: 'wrap' });
+      const payload = wrap.payload as {
+        day: number;
+        summary_md: string;
+        concept_deltas: Array<{ topic: string; concept: string; from: number; to: number }>;
+      };
+      expect(payload.day).toBe(session.roadmapDay);
+      expect(payload.summary_md).toBe(session.transcript.at(-1)!.md);
+      // SQLite Json cannot filter by threadId; narrow the commit metadata in JS.
+      const sessionEvent = events.find(
+        (candidate) => (candidate.meta as { threadId?: string }).threadId === thread.id,
+      );
+      expect(sessionEvent, thread.id).toBeDefined();
+      const meta = sessionEvent!.meta as {
+        topic: string;
+        deltas: Array<{ concept: string; from: number; to: number }>;
+      };
+      expect(payload.concept_deltas).toEqual(
+        meta.deltas.map((delta) => ({ topic: meta.topic, ...delta })),
+      );
+    }
   });
 });
 
@@ -456,9 +555,7 @@ describe('seeded Exam DB row (Phase 6: History shows the mock sitting)', () => {
     const events = await prisma.activityEvent.findMany({
       where: { userId: summary.alex!.userId, kind: 'commit' },
     });
-    const examEvent = events.find(
-      (e) => (e.meta as { type?: string }).type === 'exam',
-    );
+    const examEvent = events.find((e) => (e.meta as { type?: string }).type === 'exam');
     expect(examEvent).toBeDefined();
     expect(exam.gradedAt!.getTime()).toBe(examEvent!.at.getTime());
   });
@@ -474,6 +571,7 @@ describe('sam, idempotency and --force', () => {
     const log = await workspaces.git(samId).log();
     expect(log).toHaveLength(1);
     expect(log[0]!.message).toBe('system: initialize memory');
+    expect(await prisma.thread.count({ where: { userId: samId } })).toBe(0);
   });
 
   it('--user alex --force resets history but preserves User.id and authId', async () => {
@@ -483,6 +581,9 @@ describe('sam, idempotency and --force', () => {
       data: { authId: 'clerk_demo_link' },
     });
     const headBefore = await workspaces.git(before!.id).headSha();
+    const itemMirrorsBefore = await prisma.itemMirror.count({
+      where: { thread: { userId: before!.id } },
+    });
 
     const forced = await seedDemo({ config, prisma, now: SEED_NOW, only: 'alex', force: true });
 
@@ -492,6 +593,9 @@ describe('sam, idempotency and --force', () => {
     expect(forced.alex!.commits).toBe(summary.alex!.commits);
     // Fully deterministic given the same --now: identical HEAD sha.
     expect(await workspaces.git(after!.id).headSha()).toBe(headBefore);
+    expect(await prisma.itemMirror.count({ where: { thread: { userId: after!.id } } })).toBe(
+      itemMirrorsBefore,
+    );
     const events = await prisma.activityEvent.count({ where: { userId: after!.id } });
     expect(events).toBe(summary.alex!.commits);
     expect(await prisma.track.count({ where: { userId: after!.id } })).toBe(2);

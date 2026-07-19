@@ -112,6 +112,8 @@ export interface SessionSeed {
   concepts: string[];
   nextTime?: string;
   narrative: string;
+  /** Authored chat messages; the system start row and wrap card are added by the seeder. */
+  transcript: Array<{ role: 'user' | 'agent'; md: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +205,12 @@ const SQL_CONCEPTS: ConceptSeed[] = [
       'Composite join keys handled correctly on the orders/customers pair',
     ],
     arc: [
-      { day: 16, to: 0.2, kind: 'learn', note: 'First attempt: rows multiplied unexpectedly on duplicate keys' },
+      {
+        day: 16,
+        to: 0.2,
+        kind: 'learn',
+        note: 'First attempt: rows multiplied unexpectedly on duplicate keys',
+      },
       { day: 15, to: 0.35, kind: 'learn' },
       { day: 14, to: 0.48, kind: 'learn' },
       { day: 11, to: 0.56, kind: 'review' },
@@ -226,7 +233,12 @@ const SQL_CONCEPTS: ConceptSeed[] = [
       'LEFT vs INNER choice articulated correctly for three scenarios',
     ],
     arc: [
-      { day: 6, to: 0.25, kind: 'learn', note: 'First pass: which side keeps its rows took two tries' },
+      {
+        day: 6,
+        to: 0.25,
+        kind: 'learn',
+        note: 'First pass: which side keeps its rows took two tries',
+      },
       { day: 4, to: 0.42, kind: 'learn' },
       { day: 2, to: 0.48, kind: 'exam' },
       {
@@ -585,9 +597,7 @@ const PYTHON_CONCEPTS: ConceptSeed[] = [
     id: 'sliding-window',
     name: 'Sliding window',
     prereqs: ['two-pointers'],
-    flavor: [
-      'Fixed-size window average done; variable-size shrink condition needed a hint',
-    ],
+    flavor: ['Fixed-size window average done; variable-size shrink condition needed a hint'],
     arc: [{ day: 1, to: 0.36, kind: 'learn', group: 'py-patterns' }],
     srsDueInDays: 1,
     srsEase: 2.35,
@@ -658,9 +668,7 @@ const PYTHON_CONCEPTS: ConceptSeed[] = [
     id: 'linked-lists',
     name: 'Linked lists',
     prereqs: ['recursion'],
-    flavor: [
-      'Node-hopping reversal drawn out on paper before coding',
-    ],
+    flavor: ['Node-hopping reversal drawn out on paper before coding'],
     arc: [{ day: 2, to: 0.36, kind: 'learn' }],
     srsDueInDays: 1,
     srsEase: 2.35,
@@ -669,9 +677,7 @@ const PYTHON_CONCEPTS: ConceptSeed[] = [
     id: 'trees-basics',
     name: 'Binary trees',
     prereqs: ['recursion'],
-    flavor: [
-      'In-order traversal recursed correctly; iterative version pending',
-    ],
+    flavor: ['In-order traversal recursed correctly; iterative version pending'],
     arc: [{ day: 1, to: 0.3, kind: 'learn' }],
     srsDueInDays: 2,
     srsEase: 2.35,
@@ -868,7 +874,11 @@ Alex is a mid-level frontend engineer with strong JavaScript fundamentals, rusty
         title: 'Subqueries, indexes, and filter order',
         completedOnDay: 8,
         topics: [{ topic: 'sql', concepts: ['subqueries', 'indexes-basics', 'where-clause'] }],
-        subtopics: ['Correlated and uncorrelated subqueries', 'Read a basic query plan', 'Fix the WHERE-before-JOIN gap'],
+        subtopics: [
+          'Correlated and uncorrelated subqueries',
+          'Read a basic query plan',
+          'Fix the WHERE-before-JOIN gap',
+        ],
       },
       {
         day: 10,
@@ -889,13 +899,21 @@ Alex is a mid-level frontend engineer with strong JavaScript fundamentals, rusty
         title: 'Mock-interview gap drills',
         completedOnDay: 3,
         topics: [{ topic: 'sql', concepts: ['exists-in-vs-join', 'self-joins', 'union-set-ops'] }],
-        subtopics: ['EXISTS and NULL-safe membership', 'Self-join recognition', 'Timed mixed-question recovery'],
+        subtopics: [
+          'EXISTS and NULL-safe membership',
+          'Self-join recognition',
+          'Timed mixed-question recovery',
+        ],
       },
       {
         day: 13,
         title: 'LEFT JOIN edge cases',
         topics: [{ topic: 'sql', concepts: ['left-join', 'null-semantics', 'aggregates'] }],
-        subtopics: ['COUNT over NULL-extended rows', 'NULL join keys and unmatched records', 'Explain the result before running it'],
+        subtopics: [
+          'COUNT over NULL-extended rows',
+          'NULL join keys and unmatched records',
+          'Explain the result before running it',
+        ],
       },
       {
         day: 14,
@@ -942,13 +960,17 @@ Alex is a mid-level frontend engineer with strong JavaScript fundamentals, rusty
       {
         day: 21,
         title: 'Full mock interview',
-        topics: [{ topic: 'sql', concepts: ['left-join', 'window-functions', 'query-optimization'] }],
+        topics: [
+          { topic: 'sql', concepts: ['left-join', 'window-functions', 'query-optimization'] },
+        ],
         subtopics: ['Timed query-writing round', 'Explain correctness and performance trade-offs'],
       },
       {
         day: 22,
         title: 'Final review and interview strategy',
-        topics: [{ topic: 'sql', concepts: ['null-semantics', 'exists-in-vs-join', 'indexes-basics'] }],
+        topics: [
+          { topic: 'sql', concepts: ['null-semantics', 'exists-in-vs-join', 'indexes-basics'] },
+        ],
         subtopics: ['Repair the last weak spots', 'Build a concise interview-day checklist'],
       },
     ],
@@ -988,20 +1010,29 @@ Alex already reasons well in JavaScript but is new to interview-style Python. Co
         title: 'Complexity and Python arrays',
         completedOnDay: 10,
         topics: [{ topic: 'python', concepts: ['big-o', 'arrays-lists', 'list-comprehensions'] }],
-        subtopics: ['Big-O from familiar JavaScript examples', 'List operations, slicing, and comprehensions'],
+        subtopics: [
+          'Big-O from familiar JavaScript examples',
+          'List operations, slicing, and comprehensions',
+        ],
       },
       {
         day: 2,
         title: 'Strings and hash maps',
         completedOnDay: 8,
         topics: [{ topic: 'python', concepts: ['strings-py', 'hashmaps'] }],
-        subtopics: ['Frequency maps and dictionary idioms', 'Immutable-string construction with join'],
+        subtopics: [
+          'Frequency maps and dictionary idioms',
+          'Immutable-string construction with join',
+        ],
       },
       {
         day: 3,
         title: 'Two-pointer patterns',
         topics: [{ topic: 'python', concepts: ['two-pointers', 'arrays-lists'] }],
-        subtopics: ['Converging pointers on sorted input', 'State pointer invariants before coding'],
+        subtopics: [
+          'Converging pointers on sorted input',
+          'State pointer invariants before coding',
+        ],
       },
       {
         day: 4,
@@ -1112,7 +1143,8 @@ export const MISCONCEPTIONS: MisconceptionSeed[] = [
     openedDay: 15,
     resolvedDay: 12,
     evidence: 'Selected a non-grouped column in {ex} and expected a single row per group.',
-    remediation: 'Show the grouped-rows mental model; every selected column must be grain or aggregate.',
+    remediation:
+      'Show the grouped-rows mental model; every selected column must be grain or aggregate.',
   },
   {
     id: 'pk-order',
@@ -1145,118 +1177,788 @@ export const NEXT_TIME_POINTER = 'LEFT JOIN edge cases with NULLs';
 
 export const SESSIONS: SessionSeed[] = [
   {
-    day: 20, slug: 'sql-select-basics', mode: 'learn', track: 'sql-interview', roadmapDay: 1,
-    title: 'SELECT fundamentals', topics: ['sql'], duration: '30m', concepts: ['select-basics'],
+    day: 20,
+    slug: 'sql-select-basics',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 1,
+    title: 'SELECT fundamentals',
+    topics: ['sql'],
+    duration: '30m',
+    concepts: ['select-basics'],
     nextTime: 'WHERE clause fundamentals',
-    narrative: 'First sitting. Projections, aliases and DISTINCT on the practice schema. Alex moves fast with concrete examples in front of them and stalls on abstract definitions — leading with runnable queries worked well.',
+    narrative:
+      'First sitting. Projections, aliases and DISTINCT on the practice schema. Alex moves fast with concrete examples in front of them and stalls on abstract definitions — leading with runnable queries worked well.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'You’re moving from frontend work toward backend interviews, and SQL is the rusty part. Start concrete: if `customers` has `id`, `name`, and `city`, what columns come back from `SELECT name AS customer_name, city FROM customers;`?',
+      },
+      {
+        role: 'user',
+        md: '`customer_name` and `city`. The alias only changes the heading, right?',
+      },
+      {
+        role: 'agent',
+        md: 'Exactly—the stored column stays `name`; the result labels it `customer_name`. Now suppose the cities are Pune, Mumbai, Pune. Predict the rows from:\n\n```sql\nSELECT DISTINCT city FROM customers;\n```',
+      },
+      { role: 'user', md: 'Two rows: Pune and Mumbai. Does DISTINCT sort them too?' },
+      {
+        role: 'agent',
+        md: 'No. `DISTINCT` removes duplicate result rows; it promises no order. Ordering is a separate operation. One last check: would `SELECT DISTINCT city, name` still collapse both Pune customers?',
+      },
+      { role: 'user', md: 'I think yes because city is first.' },
+      {
+        role: 'agent',
+        md: 'It would not—the whole selected pair must match, so different names keep both rows. You can now project columns, rename output, and deduplicate at the correct grain. Next time we’ll make the result selective with `WHERE`.',
+      },
+    ],
   },
   {
-    day: 19, slug: 'sql-where', mode: 'learn', track: 'sql-interview', roadmapDay: 2,
-    title: 'Filtering with WHERE', topics: ['sql'], duration: '35m', concepts: ['select-basics', 'where-clause'],
+    day: 19,
+    slug: 'sql-where',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 2,
+    title: 'Filtering with WHERE',
+    topics: ['sql'],
+    duration: '35m',
+    concepts: ['select-basics', 'where-clause'],
     nextTime: 'Sorting and set hygiene: ORDER BY, LIMIT, DISTINCT',
-    narrative: 'Warmed up with a SELECT recap, then filtering. Comparison predicates landed quickly; BETWEEN and IN took one worked example each. NULL comparisons flagged as a likely trouble spot — watch it.',
+    narrative:
+      'Warmed up with a SELECT recap, then filtering. Comparison predicates landed quickly; BETWEEN and IN took one worked example each. NULL comparisons flagged as a likely trouble spot — watch it.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Last time you projected and deduplicated result rows. Today we’ll decide which source rows qualify. Without running it, which orders survive `WHERE total >= 50` if totals are 20, 50, and 80?',
+      },
+      { role: 'user', md: '50 and 80. `>=` includes the boundary.' },
+      {
+        role: 'agent',
+        md: 'Right. Now write one predicate for totals from 50 through 100, inclusive, and only statuses `paid` or `shipped`.',
+      },
+      {
+        role: 'user',
+        md: "```sql\nWHERE total BETWEEN 50 AND 100\n  AND status IN ('paid', 'shipped')\n```",
+      },
+      {
+        role: 'agent',
+        md: 'Clean. `BETWEEN` includes both endpoints, and `IN` is the compact equality list. Edge case: a row has `shipped_at = NULL`. Does `WHERE shipped_at = NULL` keep it?',
+      },
+      { role: 'user', md: 'It should—NULL equals NULL?' },
+      {
+        role: 'agent',
+        md: 'That’s the trap to carry forward: `NULL` means unknown, so ordinary equality does not become true. Use `shipped_at IS NULL`. Your comparison, range, and membership filters are solid; we’ll revisit NULL when we combine filtering with sorting.',
+      },
+    ],
   },
   {
-    day: 18, slug: 'sql-filtering-sorting', mode: 'learn', track: 'sql-interview', roadmapDay: 3,
-    title: 'Sorting, limits, and deduplication', topics: ['sql'], duration: '45m', concepts: ['where-clause', 'order-by-limit', 'distinct-dedup', 'null-semantics'],
+    day: 18,
+    slug: 'sql-filtering-sorting',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 3,
+    title: 'Sorting, limits, and deduplication',
+    topics: ['sql'],
+    duration: '45m',
+    concepts: ['where-clause', 'order-by-limit', 'distinct-dedup', 'null-semantics'],
     nextTime: 'Introduce joins on the orders/customers pair',
-    narrative: 'Dense sitting: ORDER BY with mixed directions, LIMIT for top-N, DISTINCT, and a first bruising encounter with NULL comparisons — the equality misconception is now logged and scheduled for remediation.',
+    narrative:
+      'Dense sitting: ORDER BY with mixed directions, LIMIT for top-N, DISTINCT, and a first bruising encounter with NULL comparisons — the equality misconception is now logged and scheduled for remediation.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'You filtered ranges correctly last time, but `NULL = NULL` was uncertain. Warm-up: which predicate finds unshipped orders?',
+      },
+      { role: 'user', md: '`WHERE shipped_at IS NULL`. I nearly wrote equals again.' },
+      {
+        role: 'agent',
+        md: "Good catch. Now we need the three largest paid orders, newest first when totals tie. Fill in the ordering:\n\n```sql\nSELECT id, total, created_at\nFROM orders\nWHERE status = 'paid'\nORDER BY ___\nLIMIT 3;\n```",
+      },
+      { role: 'user', md: '`total DESC, created_at DESC`.' },
+      {
+        role: 'agent',
+        md: 'Yes. The first key decides first; the second breaks ties. Separate question: joining tags later may repeat an order. Would `DISTINCT id` be enough if the query also selects `tag_name`?',
+      },
+      { role: 'user', md: 'I guess yes—the id is distinct.' },
+      {
+        role: 'agent',
+        md: 'Not if `tag_name` differs: `DISTINCT` compares the complete selected row. Today you combined filter → sort → limit and identified the result grain. The remaining weak spot is NULL’s “unknown” behavior; next we’ll add customers to orders and watch row counts closely.',
+      },
+    ],
   },
   {
-    day: 16, slug: 'sql-joins-begin', mode: 'learn', track: 'sql-interview', roadmapDay: 4,
-    title: 'The INNER JOIN mental model', topics: ['sql'], duration: '40m', concepts: ['inner-join', 'select-basics'],
+    day: 16,
+    slug: 'sql-joins-begin',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 4,
+    title: 'The INNER JOIN mental model',
+    topics: ['sql'],
+    duration: '40m',
+    concepts: ['inner-join', 'select-basics'],
     nextTime: 'Row-multiplication drill, then join-filter ordering',
-    narrative: 'Started INNER JOIN. Rows multiplying on duplicate keys genuinely surprised Alex — spent most of the sitting drawing match tables by hand. Ended frustrated but with the mechanic half-formed. Kept the SELECT review light.',
+    narrative:
+      'Started INNER JOIN. Rows multiplying on duplicate keys genuinely surprised Alex — spent most of the sitting drawing match tables by hand. Ended frustrated but with the mechanic half-formed. Kept the SELECT review light.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'You can shape one table now. Today we connect orders to customers, one match at a time. Customer 7 has two orders. How many joined rows should customer 7 produce?',
+      },
+      { role: 'user', md: 'One? It is still one customer.' },
+      {
+        role: 'agent',
+        md: 'An `INNER JOIN` emits matching pairs, not unique customers. One customer row paired with two order rows makes two result rows. Draw the pairs if customers are `[7 Alex]` and orders are `[101→7]`, `[102→7]`.',
+      },
+      { role: 'user', md: '`Alex–101` and `Alex–102`. Okay, the customer data repeats.' },
+      {
+        role: 'agent',
+        md: 'Exactly. Now add a second customer row with the same join key 7—bad data, but useful. With two customer rows and two order rows sharing 7, how many pairs?',
+      },
+      { role: 'user', md: 'Three? One original plus the extra customer?' },
+      {
+        role: 'agent',
+        md: 'Four: every matching left row pairs with every matching right row, `2 × 2`. This felt rough because “entity count” and “result row count” are different. Next time we’ll drill multiplication first, then place filters without guessing.',
+      },
+    ],
   },
   {
-    day: 15, slug: 'sql-joins-and-grouping', mode: 'learn', track: 'sql-interview', roadmapDay: 5,
-    title: 'Grouping grain and aggregates', topics: ['sql'], duration: '45m', concepts: ['inner-join', 'group-by', 'aggregates', 'order-by-limit'],
+    day: 15,
+    slug: 'sql-joins-and-grouping',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 5,
+    title: 'Grouping grain and aggregates',
+    topics: ['sql'],
+    duration: '45m',
+    concepts: ['inner-join', 'group-by', 'aggregates', 'order-by-limit'],
     nextTime: 'Consolidate joins; GROUP BY grain drill',
-    narrative: 'Joins improving with the match-table habit. Introduced GROUP BY and aggregates together; the non-grouped-column misconception surfaced immediately and is logged. Aggregates themselves came easily.',
+    narrative:
+      'Joins improving with the match-table habit. Introduced GROUP BY and aggregates together; the non-grouped-column misconception surfaced immediately and is logged. Aggregates themselves came easily.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Last time duplicate join keys multiplied pairs. Quick recall: one customer with three orders becomes how many joined rows?',
+      },
+      { role: 'user', md: 'Three. One row per matching pair.' },
+      {
+        role: 'agent',
+        md: 'Good. Now change the question: one row per customer, with order count. What is the grain, and what belongs in `GROUP BY`?\n\n```sql\nSELECT c.id, COUNT(*)\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nGROUP BY ___;\n```',
+      },
+      { role: 'user', md: '`c.id`. Could I also select `o.created_at` to see when they ordered?' },
+      {
+        role: 'agent',
+        md: 'Not as a bare column: each customer group may contain many creation times, so SQL has no single value to return. Choose an aggregate such as `MIN(o.created_at)` or change the grain. Which aggregate gives the latest order?',
+      },
+      {
+        role: 'user',
+        md: '`MAX(o.created_at)`. So every selected value is either the grain or summarized.',
+      },
+      {
+        role: 'agent',
+        md: 'That rule is the center of grouping. Your join row-count habit held, and `COUNT`, `MIN`, and `MAX` came quickly. Next time we’ll state the grain before every query and fold NULL filtering back in.',
+      },
+    ],
   },
   {
-    day: 14, slug: 'sql-consolidation', mode: 'learn', track: 'sql-interview', roadmapDay: 6,
-    title: 'Join and NULL consolidation', topics: ['sql'], duration: '40m', concepts: ['inner-join', 'group-by', 'where-clause', 'null-semantics', 'string-functions'],
+    day: 14,
+    slug: 'sql-consolidation',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 6,
+    title: 'Join and NULL consolidation',
+    topics: ['sql'],
+    duration: '40m',
+    concepts: ['inner-join', 'group-by', 'where-clause', 'null-semantics', 'string-functions'],
     nextTime: 'Aggregates depth, then HAVING',
-    narrative: 'Consolidation day. The NULL-equality misconception is RESOLVED — Alex reproduced the three-valued logic table and fixed the quiz query unprompted. Joins at 0.48 and climbing steadily.',
+    narrative:
+      'Consolidation day. The NULL-equality misconception is RESOLVED — Alex reproduced the three-valued logic table and fixed the quiz query unprompted. Joins at 0.48 and climbing steadily.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Yesterday you found the grouping rule: each selected value is grain or aggregate. Before adding anything, retrieve the NULL rule. What does `middle_name = NULL` evaluate to for a missing middle name?',
+      },
+      { role: 'user', md: 'Unknown, not true. So `WHERE middle_name IS NULL`.' },
+      {
+        role: 'agent',
+        md: 'Exactly. Now predict this join: an order has `customer_id = NULL`; a customer row somehow has `id = NULL`. Does `o.customer_id = c.id` match them?',
+      },
+      {
+        role: 'user',
+        md: 'No. Unknown equals unknown is still unknown, so the join condition does not pass.',
+      },
+      {
+        role: 'agent',
+        md: 'That’s the same three-valued logic in a new place. Write the customer domain from `email`, but keep rows with missing email labeled `unknown`.',
+      },
+      {
+        role: 'user',
+        md: "Maybe `COALESCE(SUBSTR(email, INSTR(email, '@') + 1), 'unknown')`?",
+      },
+      {
+        role: 'agent',
+        md: 'Yes for NULL email; the string expression stays NULL and `COALESCE` supplies the label. You resolved the equality gap rather than memorizing one WHERE trick. Joins are steadier too. Next time: aggregate depth, then why grouped results need `HAVING`.',
+      },
+    ],
   },
   {
-    day: 12, slug: 'sql-having-windows', mode: 'learn', track: 'sql-interview', roadmapDay: 7,
-    title: 'HAVING and first window functions', topics: ['sql'], duration: '45m', concepts: ['group-by', 'having', 'window-functions', 'aggregates'],
+    day: 12,
+    slug: 'sql-having-windows',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 7,
+    title: 'HAVING and first window functions',
+    topics: ['sql'],
+    duration: '45m',
+    concepts: ['group-by', 'having', 'window-functions', 'aggregates'],
     nextTime: 'Window functions second pass; keep join reps going',
-    narrative: 'GROUP BY misconception resolved during review — grain-first thinking is sticking. Introduced HAVING and a first taste of window functions; ROW_NUMBER made sense, PARTITION BY syntax did not stick yet.',
+    narrative:
+      'GROUP BY misconception resolved during review — grain-first thinking is sticking. Introduced HAVING and a first taste of window functions; ROW_NUMBER made sense, PARTITION BY syntax did not stick yet.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Your grain-first rule held last time. Retrieve it on this request: “customers with at least three orders.” Does the count condition belong in `WHERE` or `HAVING`?',
+      },
+      { role: 'user', md: '`WHERE COUNT(*) >= 3`?' },
+      {
+        role: 'agent',
+        md: "`WHERE` runs on input rows, before groups have a count. Use `HAVING COUNT(*) >= 3` after `GROUP BY customer_id`. Quick contrast: where would `status = 'paid'` go if only paid orders should be counted?",
+      },
+      {
+        role: 'user',
+        md: 'In `WHERE`, because it filters orders before grouping. Then `HAVING` filters the groups.',
+      },
+      {
+        role: 'agent',
+        md: 'Right. A window keeps detail rows instead of collapsing them. Predict what `ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at DESC)` assigns to each customer’s newest order.',
+      },
+      {
+        role: 'user',
+        md: 'Row 1 for the newest, then 2, 3 inside that customer. I keep forgetting where `PARTITION BY` goes.',
+      },
+      {
+        role: 'agent',
+        md: 'Keep the shape: `function() OVER (PARTITION BY group ORDER BY sequence)`. You now separate input filters, group filters, and per-group numbering. The syntax needs another pass, so next time we’ll rebuild it from memory and compare ranking functions.',
+      },
+    ],
   },
   {
-    day: 11, slug: 'sql-windows-case', mode: 'learn', track: 'sql-interview', roadmapDay: 8,
-    title: 'Window ranking and CASE', topics: ['sql'], duration: '35m', concepts: ['window-functions', 'case-expressions', 'inner-join', 'select-basics'],
+    day: 11,
+    slug: 'sql-windows-case',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 8,
+    title: 'Window ranking and CASE',
+    topics: ['sql'],
+    duration: '35m',
+    concepts: ['window-functions', 'case-expressions', 'inner-join', 'select-basics'],
     nextTime: 'Multi-table joins',
-    narrative: 'Window functions second pass went better — ranking trio differences now recitable. CASE expressions introduced via a bucketing exercise. Join review keeps the streak of small daily reps.',
+    narrative:
+      'Window functions second pass went better — ranking trio differences now recitable. CASE expressions introduced via a bucketing exercise. Join review keeps the streak of small daily reps.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Last time the window idea made sense but the syntax faded. Rebuild the clause for ranking salaries from highest to lowest inside each department.',
+      },
+      {
+        role: 'user',
+        md: '`RANK() OVER (PARTITION BY department_id ORDER BY salary DESC)`.',
+      },
+      {
+        role: 'agent',
+        md: 'Correct. Salaries are 100, 100, 90. Give the outputs for `ROW_NUMBER`, `RANK`, and `DENSE_RANK`.',
+      },
+      { role: 'user', md: '`ROW_NUMBER`: 1,2,3. `RANK`: 1,1,3. `DENSE_RANK`: 1,1,2.' },
+      {
+        role: 'agent',
+        md: 'That distinction is clean now. Add one idea: bucket each salary as `high` at 100+, `mid` at 80+, otherwise `low`. Which CASE branch must come first?',
+      },
+      { role: 'user', md: 'The 80+ branch, because it catches more values?' },
+      {
+        role: 'agent',
+        md: 'Put 100+ first. CASE stops at the first true branch; 100 also satisfies 80+, so broad-first would hide `high`. Today you retrieved window ranking and added ordered CASE conditions. Next time we’ll extend the join chain beyond two tables.',
+      },
+    ],
   },
   {
-    day: 10, slug: 'python-kickoff', mode: 'learn', track: 'python-dsa', roadmapDay: 1,
-    title: 'Python DS&A kickoff', topics: ['python', 'sql'], duration: '50m', concepts: ['big-o', 'arrays-lists', 'list-comprehensions', 'joins-multi-table', 'window-functions'],
+    day: 10,
+    slug: 'python-kickoff',
+    mode: 'learn',
+    track: 'python-dsa',
+    roadmapDay: 1,
+    title: 'Python DS&A kickoff',
+    topics: ['python', 'sql'],
+    duration: '50m',
+    concepts: [
+      'big-o',
+      'arrays-lists',
+      'list-comprehensions',
+      'joins-multi-table',
+      'window-functions',
+    ],
     nextTime: 'Python containers depth; SQL subqueries',
-    narrative: 'Added the python-dsa track — interviews will have a DS&A screen too. Big-O intuition is decent from JS experience; the append-is-O(n) belief is logged as a misconception. On the SQL side, multi-table joins opened smoothly.',
+    narrative:
+      'Added the python-dsa track — interviews will have a DS&A screen too. Big-O intuition is decent from JS experience; the append-is-O(n) belief is logged as a misconception. On the SQL side, multi-table joins opened smoothly.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Your SQL track is moving, and the same backend roles also test data structures. Your JavaScript instincts transfer. In Python, what is the time cost of reading `items[i]` from a list?',
+      },
+      { role: 'user', md: 'O(1), like a JS array. But `append` is O(n), so I should pre-size it.' },
+      {
+        role: 'agent',
+        md: 'Indexing is O(1). A single append can occasionally resize and copy, but across many appends the average cost is O(1)—amortized. Which is clearer for squaring even numbers: a pre-sized list or this?\n\n```python\nsquares = [n * n for n in nums if n % 2 == 0]\n```',
+      },
+      {
+        role: 'user',
+        md: 'The comprehension. I’m still suspicious of append inside a loop though.',
+      },
+      {
+        role: 'agent',
+        md: 'Keep the suspicion as a hypothesis; we’ll test the growth mechanism later. SQL recall: users → orders → products is a three-table chain. Why build and count users→orders before adding products?',
+      },
+      {
+        role: 'user',
+        md: 'So if rows explode, I know which join caused it instead of debugging the whole chain.',
+      },
+      {
+        role: 'agent',
+        md: 'Exactly. You transferred array indexing, wrote a readable comprehension, and used incremental row counts on a longer join. Next time we’ll deepen Python containers and open SQL subqueries; amortized append remains the question to settle.',
+      },
+    ],
   },
   {
-    day: 9, slug: 'sql-subqueries-indexes', mode: 'learn', track: 'sql-interview', roadmapDay: 9,
-    title: 'Subqueries and index basics', topics: ['sql', 'python'], duration: '45m', concepts: ['subqueries', 'having', 'indexes-basics', 'strings-py', 'recursion'],
+    day: 9,
+    slug: 'sql-subqueries-indexes',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 9,
+    title: 'Subqueries and index basics',
+    topics: ['sql', 'python'],
+    duration: '45m',
+    concepts: ['subqueries', 'having', 'indexes-basics', 'strings-py', 'recursion'],
     nextTime: 'WHERE vs ON — the join-filter distinction needs a direct hit',
-    narrative: 'Subqueries opened well. First indexing pass; the PRIMARY-KEY-implies-ordering claim is logged. Python strings and recursion basics slotted into the morning block without friction.',
+    narrative:
+      'Subqueries opened well. First indexing pass; the PRIMARY-KEY-implies-ordering claim is logged. Python strings and recursion basics slotted into the morning block without friction.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'You built longer joins incrementally and started Python containers. Today, one SQL question: which customers spent above the overall average order total? What value could a scalar subquery provide?',
+      },
+      {
+        role: 'user',
+        md: '`(SELECT AVG(total) FROM orders)` gives the cutoff, then the outer query compares against it.',
+      },
+      {
+        role: 'agent',
+        md: 'Yes. Now an index claim: because `orders.id` is a primary key, will `SELECT * FROM orders` always arrive in id order for free?',
+      },
+      { role: 'user', md: 'I think so. The primary key is the index, and indexes are ordered.' },
+      {
+        role: 'agent',
+        md: 'Do not rely on that. A key is a logical guarantee; storage and access plans are implementation choices. Only `ORDER BY id` promises output order. Python check: what two parts must every recursive function make obvious?',
+      },
+      {
+        role: 'user',
+        md: 'A base case and a smaller recursive call. For strings, build pieces and `"".join(parts)` instead of repeated `+=`.',
+      },
+      {
+        role: 'agent',
+        md: 'Good. Subqueries, recursion, and the string pattern landed. Index ordering needs evidence from a query plan, not assumption. Next time we’ll hit a more urgent join gap directly: whether a WHERE filter somehow happens before the join.',
+      },
+    ],
   },
   {
-    day: 8, slug: 'python-hashmaps-strings', mode: 'learn', track: 'python-dsa', roadmapDay: 2,
-    title: 'Strings and hash maps', topics: ['python'], duration: '30m', concepts: ['strings-py', 'hashmaps'],
+    day: 8,
+    slug: 'python-hashmaps-strings',
+    mode: 'learn',
+    track: 'python-dsa',
+    roadmapDay: 2,
+    title: 'Strings and hash maps',
+    topics: ['python'],
+    duration: '30m',
+    concepts: ['strings-py', 'hashmaps'],
     nextTime: 'Two-pointer patterns on sorted arrays',
-    narrative: 'Second focused Python block. Built a frequency map with dict.get, rewrote repeated string concatenation with join, and solved two-sum cleanly. Python container syntax is starting to feel natural.',
+    narrative:
+      'Second focused Python block. Built a frequency map with dict.get, rewrote repeated string concatenation with join, and solved two-sum cleanly. Python container syntax is starting to feel natural.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Last Python block, list indexing transferred cleanly and amortized append felt suspicious. Today we’ll use a dictionary for fast lookup. How would you count letters in `"banana"` without checking every earlier character each time?',
+      },
+      {
+        role: 'user',
+        md: "```python\ncounts = {}\nfor ch in 'banana':\n    counts[ch] = counts.get(ch, 0) + 1\n```",
+      },
+      {
+        role: 'agent',
+        md: 'That is the idiom: lookup the old count, default to zero, then replace it. What dictionary do you end with?',
+      },
+      { role: 'user', md: "`{'b': 1, 'a': 3, 'n': 2}`." },
+      {
+        role: 'agent',
+        md: 'Now two-sum: while scanning `nums`, store numbers already seen. For current value `x`, what do you look up if the target is 10?',
+      },
+      { role: 'user', md: '`10 - x`. If it exists, I have the pair; otherwise store `x`.' },
+      {
+        role: 'agent',
+        md: 'Exactly—one pass with expected O(1) dictionary lookups. You also have the string-building pattern: collect parts, then `"".join(parts)`. Python container syntax is becoming natural. Next time we’ll exploit sorted order with two pointers instead of a map.',
+      },
+    ],
   },
   {
-    day: 8, slug: 'sql-join-filtering', mode: 'learn', track: 'sql-interview', roadmapDay: 9,
-    title: 'Fixing the WHERE-before-JOIN gap', topics: ['sql', 'python'], duration: '45m', concepts: ['inner-join', 'where-clause', 'indexes-basics', 'hashmaps'],
+    day: 8,
+    slug: 'sql-join-filtering',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 9,
+    title: 'Fixing the WHERE-before-JOIN gap',
+    topics: ['sql', 'python'],
+    duration: '45m',
+    concepts: ['inner-join', 'where-clause', 'indexes-basics', 'hashmaps'],
     nextTime: 'Multi-table join practice; python hashmap drills',
-    narrative: 'The WHERE-before-JOIN misconception is now logged explicitly after the row-count prediction miss — remediation planned. Yesterday\'s PK-ordering confusion resolved with a query plan. Python hashmaps introduced; two-sum solved.',
+    narrative:
+      "The WHERE-before-JOIN misconception is now logged explicitly after the row-count prediction miss — remediation planned. Yesterday's PK-ordering confusion resolved with a query plan. Python hashmaps introduced; two-sum solved.",
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Yesterday you treated a primary key as an ordering promise. The query plan separated the logical key from the chosen access path. Today: customers joined to orders make five matching pairs; three orders are paid. How many rows exist immediately after the logical JOIN, before WHERE?',
+      },
+      { role: 'user', md: "Three, because `WHERE o.status = 'paid'` filters the orders first." },
+      {
+        role: 'agent',
+        md: "That prediction is the gap. Use this logical model: `FROM/JOIN` forms five matching pairs, then `WHERE` keeps the three paid pairs. An optimizer may rearrange work safely, but query meaning follows that model. Now compare:\n\n```sql\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.status = 'paid'\n```\n\nDoes a customer with no orders survive?",
+      },
+      { role: 'user', md: 'Yes? LEFT JOIN keeps every customer.' },
+      {
+        role: 'agent',
+        md: "The join first creates a NULL-extended row, then WHERE tests `NULL = 'paid'`, which is unknown, so that customer is removed. Move the right-side filter into `ON` if unmatched customers must stay. Predict this version: `ON o.customer_id = c.id AND o.status = 'paid'`.",
+      },
+      {
+        role: 'user',
+        md: 'The customer survives with NULL order columns if no paid order matches. So ON controls matches; WHERE filters the joined result.',
+      },
+      {
+        role: 'agent',
+        md: 'That distinction is the target. Keep checking the intermediate joined row count before applying WHERE. The index-order claim is settled, and your hashmap lookup held in a quick two-sum rep. Next time: build a three-table join incrementally, then repeat this filter placement.',
+      },
+    ],
   },
   {
-    day: 7, slug: 'sql-multi-joins', mode: 'learn', track: 'sql-interview', roadmapDay: 10,
-    title: 'Multi-table joins and set operations', topics: ['sql', 'python'], duration: '50m', concepts: ['joins-multi-table', 'subqueries', 'union-set-ops', 'group-by', 'arrays-lists'],
+    day: 7,
+    slug: 'sql-multi-joins',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 10,
+    title: 'Multi-table joins and set operations',
+    topics: ['sql', 'python'],
+    duration: '50m',
+    concepts: ['joins-multi-table', 'subqueries', 'union-set-ops', 'group-by', 'arrays-lists'],
     nextTime: 'CTEs and LEFT JOIN',
-    narrative: 'Three-table joins built incrementally with row-count checks — the discipline from the early join struggles is paying off. Set operations introduced; UNION default behavior still not internalized.',
+    narrative:
+      'Three-table joins built incrementally with row-count checks — the discipline from the early join struggles is paying off. Set operations introduced; UNION default behavior still not internalized.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Last time you corrected the model: JOIN forms matches; WHERE filters the joined rows. Build today’s chain incrementally: customers → orders gives 12 rows. Adding order_items gives 31. What does that increase mean before we add products?',
+      },
+      {
+        role: 'user',
+        md: 'Some orders have several items, so order data repeats once per item. It is expected multiplication, not automatically a bug.',
+      },
+      {
+        role: 'agent',
+        md: 'Exactly. Add products only through `order_items.product_id = products.id`, then check whether the count stays 31. New operation: query A returns `[1,2,2]`; query B returns `[2,3]`. Predict `UNION`.',
+      },
+      { role: 'user', md: '`[1,2,2,2,3]`—it stacks both results.' },
+      {
+        role: 'agent',
+        md: '`UNION ALL` stacks all five rows. `UNION` removes duplicate result rows, yielding `[1,2,3]`. Which one should you choose when duplicates are meaningful and you do not want deduplication work?',
+      },
+      {
+        role: 'user',
+        md: '`UNION ALL`. Plain `UNION` is the deduplicating one—I had the default backward.',
+      },
+      {
+        role: 'agent',
+        md: 'Keep that contrast active; it is not automatic yet. Your three-table join was disciplined: add one relation, predict grain, count rows. Next time we’ll preserve unmatched rows with LEFT JOIN and make a nested query readable with a CTE.',
+      },
+    ],
   },
   {
-    day: 6, slug: 'sql-left-join-cte', mode: 'learn', track: 'sql-interview', roadmapDay: 11,
-    title: 'LEFT JOINs and readable CTEs', topics: ['sql', 'python'], duration: '45m', concepts: ['left-join', 'cte', 'inner-join', 'select-basics', 'binary-search'],
+    day: 6,
+    slug: 'sql-left-join-cte',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 11,
+    title: 'LEFT JOINs and readable CTEs',
+    topics: ['sql', 'python'],
+    duration: '45m',
+    concepts: ['left-join', 'cte', 'inner-join', 'select-basics', 'binary-search'],
     nextTime: 'LEFT JOIN aggregates; CTE practice',
-    narrative: 'LEFT JOIN opened — which side survives took two tries but the retention-query framing helped. First CTE rewrite made the nested subquery readable. Binary search template started on the python side.',
+    narrative:
+      'LEFT JOIN opened — which side survives took two tries but the retention-query framing helped. First CTE rewrite made the nested subquery readable. Binary search template started on the python side.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Your multi-table row counts are steadier. Today’s retention question needs every customer, even those with no orders. In `customers LEFT JOIN orders`, which side is guaranteed to survive?',
+      },
+      { role: 'user', md: 'The orders side, because it is being joined in?' },
+      {
+        role: 'agent',
+        md: 'The named left side survives: customers. Picture the sentence as “keep the left table; attach matches from the right.” What appears in order columns for a customer with no match?',
+      },
+      { role: 'user', md: 'NULLs. So the customer still has one NULL-extended result row.' },
+      {
+        role: 'agent',
+        md: 'Right. Now readability: a nested query first totals orders per customer, then the outer query keeps totals above 500. A CTE lets you name that first result `customer_totals`. What starts the query?',
+      },
+      {
+        role: 'user',
+        md: '`WITH customer_totals AS (...) SELECT ... FROM customer_totals`. It is the same result, just staged.',
+      },
+      {
+        role: 'agent',
+        md: 'Exactly. On the Python side, binary search also benefits from a stable template, though the right boundary still needs practice. Today the LEFT side took two tries but the retention framing held. Next time: count over NULL-extended rows and another CTE rewrite.',
+      },
+    ],
   },
   {
-    day: 5, slug: 'review-sprint', mode: 'review', track: 'sql-interview', roadmapDay: 11,
-    title: 'Left joins — revisited', topics: ['sql', 'python'], duration: '40m', concepts: ['order-by-limit', 'distinct-dedup', 'aggregates', 'joins-multi-table', 'recursion', 'list-comprehensions', 'hashmaps'],
+    day: 5,
+    slug: 'review-sprint',
+    mode: 'review',
+    track: 'sql-interview',
+    roadmapDay: 11,
+    title: 'Left joins — revisited',
+    topics: ['sql', 'python'],
+    duration: '40m',
+    concepts: [
+      'order-by-limit',
+      'distinct-dedup',
+      'aggregates',
+      'joins-multi-table',
+      'recursion',
+      'list-comprehensions',
+      'hashmaps',
+    ],
     nextTime: 'Second review block, then mock exam',
-    narrative: 'Deliberate review sprint ahead of the first mock exam: cleared the whole due queue. Everything held or improved — aggregates and ORDER BY are approaching solid. Python morning block steady.',
+    narrative:
+      'Deliberate review sprint ahead of the first mock exam: cleared the whole due queue. Everything held or improved — aggregates and ORDER BY are approaching solid. Python morning block steady.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'You’ve built the pieces; today is retrieval, not new material. Start with LEFT JOIN: customers A and B, only A has two orders. After the join, how many rows, and what does B’s order id contain?',
+      },
+      { role: 'user', md: 'Three rows total. Two for A, one for B, and B’s order id is NULL.' },
+      {
+        role: 'agent',
+        md: 'Correct. Now count customers’ orders while keeping B at zero. Choose between `COUNT(*)` and `COUNT(o.id)`.',
+      },
+      { role: 'user', md: '`COUNT(*)`? There is one joined row for B.' },
+      {
+        role: 'agent',
+        md: 'That is why `COUNT(*)` would report one. `COUNT(o.id)` ignores B’s NULL-extended id and reports zero. Python retrieval: in a frequency map, what does `counts.get(ch, 0) + 1` save you from?',
+      },
+      {
+        role: 'user',
+        md: 'A separate “is this key present?” branch. And recursion still needs base case first.',
+      },
+      {
+        role: 'agent',
+        md: 'Both held. Your ordering, deduplication, aggregate, join-chain, comprehension, recursion, and hashmap checks all came back without re-teaching. The one correction was `COUNT(*)` versus `COUNT(right.id)`. Next time is a second light review, then the mock interview.',
+      },
+    ],
   },
   {
-    day: 4, slug: 'sql-preexam-drills', mode: 'learn', track: 'sql-interview', roadmapDay: 12,
-    title: 'Pre-exam join drills', topics: ['sql', 'python'], duration: '55m', concepts: ['inner-join', 'left-join', 'subqueries', 'cte', 'having', 'self-joins', 'two-pointers', 'arrays-lists', 'big-o'],
+    day: 4,
+    slug: 'sql-preexam-drills',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 12,
+    title: 'Pre-exam join drills',
+    topics: ['sql', 'python'],
+    duration: '55m',
+    concepts: [
+      'inner-join',
+      'left-join',
+      'subqueries',
+      'cte',
+      'having',
+      'self-joins',
+      'two-pointers',
+      'arrays-lists',
+      'big-o',
+    ],
     nextTime: 'Light day, then the mock',
-    narrative: 'Longest sitting so far. Join reps, subquery review, first self-join, and CTE practice. The python append misconception is RESOLVED after an amortized-growth demo. Alex is visibly more confident than two weeks ago.',
+    narrative:
+      'Longest sitting so far. Join reps, subquery review, first self-join, and CTE practice. The python append misconception is RESOLVED after an amortized-growth demo. Alex is visibly more confident than two weeks ago.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Two weeks ago duplicate join keys were a wall; now you predict the grain before writing. Today’s harder variant: employees has `id` and `manager_id`. How can the same table provide both employee and manager names?',
+      },
+      { role: 'user', md: 'Join `employees` to itself, with two aliases: employee and manager.' },
+      {
+        role: 'agent',
+        md: 'Write the key relationship. Use LEFT JOIN so the CEO with no manager remains.',
+      },
+      {
+        role: 'user',
+        md: '```sql\nFROM employees e\nLEFT JOIN employees m ON e.manager_id = m.id\n```',
+      },
+      {
+        role: 'agent',
+        md: 'Exactly. Python gap next: you avoided `append` because you called every append O(n). A list occasionally grows its backing storage and copies, but many cheap appends surround each resize. Across n appends, what is the total order of growth?',
+      },
+      {
+        role: 'user',
+        md: 'O(n) total, so O(1) amortized per append. Pre-sizing was solving the wrong problem.',
+      },
+      {
+        role: 'agent',
+        md: 'That misconception is settled. Your self-join aliases, LEFT preservation, CTE staging, HAVING placement, and two-pointer conditions also held through mixed reps. You are much more deliberate with row counts now. Next time stays light, then the mock.',
+      },
+    ],
   },
   {
-    day: 3, slug: 'sql-gaps', mode: 'learn', track: 'sql-interview', roadmapDay: 12,
-    title: 'Closing the pre-exam gaps', topics: ['sql', 'python'], duration: '35m', concepts: ['exists-in-vs-join', 'null-semantics', 'union-set-ops', 'case-expressions', 'stacks-queues', 'sorting'],
+    day: 3,
+    slug: 'sql-gaps',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 12,
+    title: 'Closing the pre-exam gaps',
+    topics: ['sql', 'python'],
+    duration: '35m',
+    concepts: [
+      'exists-in-vs-join',
+      'null-semantics',
+      'union-set-ops',
+      'case-expressions',
+      'stacks-queues',
+      'sorting',
+    ],
     nextTime: 'Mock exam — sql-interview track',
-    narrative: 'Filled pre-exam gaps: EXISTS vs IN with the NULL-safety argument, NULL semantics third pass, set ops. Kept it deliberately short to stay fresh for tomorrow\'s mock.',
+    narrative:
+      "Filled pre-exam gaps: EXISTS vs IN with the NULL-safety argument, NULL semantics third pass, set ops. Kept it deliberately short to stay fresh for tomorrow's mock.",
+    transcript: [
+      {
+        role: 'agent',
+        md: 'Yesterday you resolved amortized append and handled a self-join. Today is deliberately short. For “customers who have at least one paid order,” what does `EXISTS` communicate better than a JOIN?',
+      },
+      {
+        role: 'user',
+        md: 'It asks whether a match exists, without multiplying the customer row by every paid order.',
+      },
+      {
+        role: 'agent',
+        md: 'Right. For an anti-match, `NOT EXISTS` also avoids the NULL surprise that can poison `NOT IN`. Set-ops retrieval: A is `[1,2,2]`, B is `[2,3]`. Give `UNION` and `UNION ALL` row counts.',
+      },
+      {
+        role: 'user',
+        md: '`UNION` has 3 rows; `UNION ALL` has 5. Plain UNION removes duplicates.',
+      },
+      {
+        role: 'agent',
+        md: 'Good. One CASE check: why must the narrow `score >= 90` branch come before `score >= 60`?',
+      },
+      {
+        role: 'user',
+        md: 'First true branch wins. If 60 came first, a 95 would never reach the 90 branch.',
+      },
+      {
+        role: 'agent',
+        md: 'That is enough for today. EXISTS intent, NULL-safe anti-matching, set-operation defaults, CASE order, stack/deque choice, and sorting recall all held. Stop while fresh; next time is the SQL mock interview.',
+      },
+    ],
   },
   {
-    day: 2, slug: 'sql-mock-exam-1', mode: 'exam', track: 'sql-interview', roadmapDay: 12,
-    title: 'SQL mock interview 1', topics: ['sql'], duration: '60m', concepts: ['inner-join', 'left-join', 'group-by', 'aggregates', 'subqueries', 'null-semantics', 'union-set-ops', 'select-basics', 'where-clause'],
+    day: 2,
+    slug: 'sql-mock-exam-1',
+    mode: 'exam',
+    track: 'sql-interview',
+    roadmapDay: 12,
+    title: 'SQL mock interview 1',
+    topics: ['sql'],
+    duration: '60m',
+    concepts: [
+      'inner-join',
+      'left-join',
+      'group-by',
+      'aggregates',
+      'subqueries',
+      'null-semantics',
+      'union-set-ops',
+      'select-basics',
+      'where-clause',
+    ],
     nextTime: 'Review the missed set-ops question; LEFT JOIN depth',
-    narrative: 'First full mock on the sql-interview track: 71/100. Joins and grouping carried it; set operations and the LEFT JOIN aggregate question gave the most trouble. Readiness jumped {examDelta} — the two weeks of join work shows. UNION duplicate misconception logged from the exam evidence.',
+    narrative:
+      'First full mock on the sql-interview track: 71/100. Joins and grouping carried it; set operations and the LEFT JOIN aggregate question gave the most trouble. Readiness jumped {examDelta} — the two weeks of join work shows. UNION duplicate misconception logged from the exam evidence.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'You kept yesterday light for this. First mock: answer without hints and state the result grain. Write a query that returns one row per customer with total paid spend, including customers with no paid orders.',
+      },
+      {
+        role: 'user',
+        md: "```sql\nSELECT c.id, SUM(o.total)\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.status = 'paid'\nGROUP BY c.id\n```",
+      },
+      {
+        role: 'agent',
+        md: 'The grain and grouping are right. The WHERE clause removes NULL-extended customers; paid status belongs in `ON`, and `COALESCE(SUM(o.total), 0)` supplies zero. Next: A returns `[1,2,2]`, B returns `[2,3]`. What does `UNION` return?',
+      },
+      { role: 'user', md: '`[1,2,2,2,3]`. UNION keeps the rows and UNION ALL deduplicates?' },
+      {
+        role: 'agent',
+        md: 'Reversed: `UNION` deduplicates to `[1,2,3]`; `UNION ALL` keeps all five. Final join check: why can joining customers → orders → items produce more rows than customers → orders?',
+      },
+      {
+        role: 'user',
+        md: 'Each order can match several items. The result grain becomes one row per matching order-item pair.',
+      },
+      {
+        role: 'agent',
+        md: 'Correct. Your joins, grouping, subqueries, SELECT, WHERE, and core NULL reasoning carried the mock. The scored result is 71/100; set operations and LEFT JOIN aggregates cost the most. Next time: drill the missed UNION default and deepen LEFT JOIN counting.',
+      },
+    ],
   },
   {
-    day: 1, slug: 'sql-left-join', mode: 'learn', track: 'sql-interview', roadmapDay: 13,
-    title: 'LEFT JOIN edge cases', topics: ['sql'], duration: '30m', concepts: ['left-join', 'null-semantics'],
+    day: 1,
+    slug: 'sql-left-join',
+    mode: 'learn',
+    track: 'sql-interview',
+    roadmapDay: 13,
+    title: 'LEFT JOIN edge cases',
+    topics: ['sql'],
+    duration: '30m',
+    concepts: ['left-join', 'null-semantics'],
     nextTime: NEXT_TIME_POINTER,
-    narrative: 'Post-exam follow-up on the weakest join: LEFT JOIN with aggregates. Good progress on which side survives and COUNT over NULL-extended rows, but NULL-keyed matching tripped Alex again — logged as an open misconception. Prime target for next session.',
+    narrative:
+      'Post-exam follow-up on the weakest join: LEFT JOIN with aggregates. Good progress on which side survives and COUNT over NULL-extended rows, but NULL-keyed matching tripped Alex again — logged as an open misconception. Prime target for next session.',
+    transcript: [
+      {
+        role: 'agent',
+        md: 'The mock exposed two gaps; today we’ll take only the LEFT JOIN one. Customers A and B; A has two orders, B has none. In a grouped LEFT JOIN, what do `COUNT(*)` and `COUNT(o.id)` report for B?',
+      },
+      {
+        role: 'user',
+        md: '`COUNT(*)` is 1 for the NULL-extended row; `COUNT(o.id)` is 0 because that id is NULL.',
+      },
+      {
+        role: 'agent',
+        md: 'Exactly—the distinction that slipped earlier now holds. Harder edge: a left row has join key NULL and a right row also has join key NULL. Does `left.key = right.key` match them?',
+      },
+      { role: 'user', md: 'Yes, both keys are missing in the same way.' },
+      {
+        role: 'agent',
+        md: 'Ordinary equality yields unknown when NULL is involved, so the ON condition does not match them. The left row survives only because this is LEFT JOIN, with fresh NULLs for the right columns. How would you detect that it was unmatched?',
+      },
+      { role: 'user', md: 'Check a non-nullable right-side key with `WHERE right.id IS NULL`.' },
+      {
+        role: 'agent',
+        md: 'Right. You can now count NULL-extended rows correctly and identify unmatched records; NULL-key equality is still the live edge to retrieve again. Next time we’ll continue with **LEFT JOIN edge cases with NULLs** before moving on.',
+      },
+    ],
   },
 ];
 
@@ -1296,7 +1998,7 @@ export const EXAM_EVIDENCE_BULLETS = [
 
 export const FILLER_NOTES = [
   'Quick recall check on {concept} during coffee — clean.',
-  'Skimmed yesterday\'s notes on {concept}; nothing had faded overnight.',
+  "Skimmed yesterday's notes on {concept}; nothing had faded overnight.",
   'Alex asked a sharp follow-up about {concept} — curiosity is a good sign.',
   'Ran one warm-up rep on {concept} before the main block.',
   'Re-read the {concept} summary aloud; recall was immediate.',

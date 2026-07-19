@@ -1,10 +1,17 @@
 'use client';
 
-import { useCallback, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SubmitQuizRequest } from '@eduagent/shared';
 import { useTurnStream } from '@/hooks/use-turn-stream';
-import { interruptThread, listThreads, submitExercise, submitQuiz } from '@/lib/api';
+import {
+  createTrackSession,
+  interruptThread,
+  listThreads,
+  submitExercise,
+  submitQuiz,
+} from '@/lib/api';
 import { TutorRoomView } from '@/components/chat/tutor-room-view';
 import { useMemoryCommits } from '@/components/memory/memory-commit-provider';
 import { useTrackDetail } from '@/hooks/use-tracks';
@@ -29,8 +36,12 @@ export function TutorRoom({
   trackSlug?: string;
   showWrapUp?: boolean;
 }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const { publishCommit } = useMemoryCommits();
   const stream = useTurnStream(threadId, { onCommit: publishCommit });
+  const [revisionPending, setRevisionPending] = useState(false);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
 
   // Thread meta (title, topic chip) from the list endpoint; the room works
   // fine without it (mono thread id as the title fallback).
@@ -43,6 +54,7 @@ export function TutorRoom({
   const resolvedTrackSlug = trackSlug ?? thread?.trackSlug ?? '';
   const trackDetail = useTrackDetail(resolvedTrackSlug, resolvedTrackSlug !== '');
   const roadmapDay = thread?.roadmapDay ?? null;
+  const archived = thread?.status === 'archived';
   const dayTitle = trackDetail.data?.roadmap?.days.find((day) => day.day === roadmapDay)?.title;
   const resolvedBadge =
     badgeText ??
@@ -64,6 +76,25 @@ export function TutorRoom({
     [],
   );
 
+  const onRevise = useCallback(() => {
+    if (!resolvedTrackSlug || roadmapDay === null) return;
+    setRevisionPending(true);
+    setRevisionError(null);
+    createTrackSession(resolvedTrackSlug, { day: roadmapDay, intent: 'revise' })
+      .then((created) => {
+        void queryClient.invalidateQueries({
+          queryKey: ['tracks', resolvedTrackSlug, 'sessions'],
+        });
+        router.push(`/app/tracks/${resolvedTrackSlug}/s/${created.id}`);
+      })
+      .catch((caught: unknown) => {
+        setRevisionPending(false);
+        setRevisionError(
+          caught instanceof Error ? caught.message : 'The revision could not start.',
+        );
+      });
+  }, [queryClient, resolvedTrackSlug, roadmapDay, router]);
+
   return (
     <TutorRoomView
       title={thread?.title || `thread/${threadId.slice(0, 8)}`}
@@ -74,10 +105,14 @@ export function TutorRoom({
       onInterrupt={onInterrupt}
       onSubmitExercise={onSubmitExercise}
       onSubmitQuiz={onSubmitQuiz}
+      archived={archived}
+      onRevise={archived && roadmapDay !== null && resolvedTrackSlug ? onRevise : undefined}
+      revisionPending={revisionPending}
+      revisionError={revisionError}
       topbarExtra={
         <>
           {topbarExtra}
-          {showWrapUp ? (
+          {showWrapUp && !archived ? (
             <Button
               size="sm"
               variant="ghost"

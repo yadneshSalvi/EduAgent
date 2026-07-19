@@ -35,6 +35,10 @@ interface TutorRoomViewProps {
   topbarExtra?: ReactNode;
   emptyHint?: string;
   trackContext?: { slug: string; threadId: string };
+  archived?: boolean;
+  onRevise?: () => void;
+  revisionPending?: boolean;
+  revisionError?: string | null;
 }
 
 function ConnectionDot({ connection }: { connection: TurnStream['state']['connection'] }) {
@@ -79,10 +83,15 @@ export function TutorRoomView({
   topbarExtra,
   emptyHint,
   trackContext,
+  archived = false,
+  onRevise,
+  revisionPending = false,
+  revisionError = null,
 }: TutorRoomViewProps) {
   const { state, send, refetchHistory, dispatch } = stream;
   const turnInFlight = state.turnStatus !== 'idle';
-  const connectionLost = state.connection === 'not-found' || state.connection === 'failed';
+  const connectionLost =
+    !archived && (state.connection === 'not-found' || state.connection === 'failed');
 
   const retryTurn = () => {
     const lastUser = [...state.items].reverse().find((item) => item.role === 'user');
@@ -100,23 +109,25 @@ export function TutorRoomView({
         <h1 className="min-w-0 truncate text-body font-medium">{title}</h1>
         <div className="flex-1" />
         {topbarExtra}
-        <ConnectionDot connection={state.connection} />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!turnInFlight}
-          onClick={onInterrupt}
-          className="gap-1.5"
-          title="Stop the current turn (Esc)"
-        >
-          <Square className="size-3 fill-current" aria-hidden />
-          Stop
-        </Button>
+        {archived ? null : <ConnectionDot connection={state.connection} />}
+        {archived ? null : (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!turnInFlight}
+            onClick={onInterrupt}
+            className="gap-1.5"
+            title="Stop the current turn (Esc)"
+          >
+            <Square className="size-3 fill-current" aria-hidden />
+            Stop
+          </Button>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {state.connection === 'not-found' ? (
+          {!archived && state.connection === 'not-found' ? (
             <div className="flex flex-1 items-center justify-center p-8">
               <ErrorState
                 title="This session doesn't exist"
@@ -128,7 +139,7 @@ export function TutorRoomView({
                 }
               />
             </div>
-          ) : state.connection === 'failed' ? (
+          ) : !archived && state.connection === 'failed' ? (
             <div className="flex flex-1 items-center justify-center p-8">
               <ErrorState
                 title="Can't reach the tutor"
@@ -153,7 +164,25 @@ export function TutorRoomView({
               trackContext={trackContext}
             />
           )}
-          {state.connection === 'not-found' || state.connection === 'failed' ? null : (
+          {archived ? (
+            <div className="border-t bg-surface px-4 py-3 lg:px-6">
+              <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2">
+                <p className="text-body-sm text-muted-foreground">
+                  This session has ended — revise the topic to continue.
+                </p>
+                {onRevise ? (
+                  <Button size="sm" variant="ghost" disabled={revisionPending} onClick={onRevise}>
+                    {revisionPending ? 'Starting revision…' : 'Revise this topic'}
+                  </Button>
+                ) : null}
+                {revisionError ? (
+                  <p role="alert" className="w-full text-caption text-danger">
+                    {revisionError}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : state.connection === 'not-found' || state.connection === 'failed' ? null : (
             <ChatInput
               onSend={send}
               onInterrupt={onInterrupt}

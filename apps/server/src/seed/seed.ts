@@ -6,7 +6,7 @@ import { workspacePathFor, type AppConfig } from '../config.js';
 import { DashboardService } from '../learning/DashboardService.js';
 import { WorkspaceManager, type WorkspaceLogger } from '../workspace/index.js';
 import { ALEX_TIMEZONE, seedAlexWorkspace, type AlexSeedResult } from './alex.js';
-import { SQL_JOB_DESCRIPTION } from './content.js';
+import { SESSIONS, SQL_JOB_DESCRIPTION } from './content.js';
 import { buildAlexExamRow } from './exam-row.js';
 
 /**
@@ -21,14 +21,12 @@ import { buildAlexExamRow } from './exam-row.js';
  *   PRESERVING the User row (`id`, `authId`) so a hosted-demo Clerk link
  *   survives the nightly reset (plans/08 §6).
  *
- * Deliberately seeds NO Thread/Exercise rows: a Thread row must carry a real
- * codex thread id (with a rollout) or downstream fork/resume calls fail, and
- * codex rollouts cannot be fabricated offline — see docs in the Phase 5
- * report. Alex's past exam lives in the workspace (exam record + exam commit)
- * PLUS one graded Exam row with `threadId: null` (exam-row.ts): graded is
- * terminal, so the results view renders from the row's own JSON and no code
- * path ever resolves its thread — which puts the sitting in /app/exam History
- * without fabricating a rollout.
+ * Alex's historical sittings are archived Thread + ItemMirror rows. Their
+ * codex ids are deterministic placeholders and archived guards ensure they
+ * are replay-only; live resume/fork paths never touch them. Exercise rows stay
+ * absent. The past exam also has one terminal graded Exam row with
+ * `threadId: null` (exam-row.ts), so /app/exam History needs no fabricated
+ * rollout either.
  *
  * Run with the API server STOPPED (or restart it afterwards): the server
  * caches dashboards in memory and holds the SQLite file; seeding underneath a
@@ -223,12 +221,15 @@ async function buildWorkspace(
   base.commits = result.commits.length;
   base.exam = result.exam;
 
+  const threadIdByCommit = await createAlexSessionRows(opts.prisma, user.id, result);
+
   // One ActivityEvent per commit, shaped like the MemoryPipeline's rows, so
   // the 90-day activity strip and any feed read seeded history identically.
   const git = workspaces.git(user.id);
   const rows: Prisma.ActivityEventCreateManyInput[] = [];
   for (const commit of result.commits) {
     const { stats } = await git.diffForCommit(commit.sha);
+    const threadId = threadIdByCommit.get(commit.sha);
     rows.push({
       userId: user.id,
       kind: 'commit',
@@ -241,6 +242,7 @@ async function buildWorkspace(
         bullets: commit.bullets,
         deltas: commit.deltas,
         stats,
+        ...(threadId ? { threadId } : {}),
       } satisfies Prisma.InputJsonValue,
     });
   }
@@ -293,6 +295,88 @@ async function buildWorkspace(
   return base;
 }
 
+/** Replay-only chat history for every authored sitting in the screenplay. */
+async function createAlexSessionRows(
+  prisma: PrismaClient,
+  userId: string,
+  result: AlexSeedResult,
+): Promise<Map<string, string>> {
+  const bySlug = new Map(result.sessions.map((seeded) => [seeded.session.slug, seeded]));
+  const threads: Prisma.ThreadCreateManyInput[] = [];
+  const items: Prisma.ItemMirrorCreateManyInput[] = [];
+  const threadIdByCommit = new Map<string, string>();
+
+  for (let index = 0; index < SESSIONS.length; index++) {
+    const session = SESSIONS[index]!;
+    const seeded = bySlug.get(session.slug);
+    if (!seeded) throw new Error(`seedDemo: no generated transcript for ${session.slug}`);
+    const number = index + 1;
+    const threadId = `seed-alex-s${String(number).padStart(2, '0')}`;
+    const intent =
+      session.slug === 'review-sprint'
+        ? 'revise'
+        : session.slug === 'sql-join-filtering'
+          ? 'mistakes'
+          : 'teach';
+    threads.push({
+      id: threadId,
+      userId,
+      codexThreadId: threadId,
+      mode: session.mode === 'review' ? 'review' : 'learn',
+      topicSlug: session.topics[0]!,
+      trackSlug: session.track,
+      roadmapDay: session.roadmapDay,
+      intent,
+      title: session.title,
+      status: 'archived',
+      sessionToken: `seed-${number}`,
+      createdAt: seeded.startedAt,
+      lastActiveAt: seeded.endedAt,
+    });
+    threadIdByCommit.set(seeded.commitSha, threadId);
+
+    const totalIntervals = session.transcript.length + 1;
+    const durationMs = seeded.endedAt.getTime() - seeded.startedAt.getTime();
+    const at = (position: number): Date =>
+      new Date(seeded.startedAt.getTime() + Math.floor((durationMs * position) / totalIntervals));
+    items.push({
+      id: `${threadId}-i000`,
+      threadId,
+      role: 'system',
+      kind: 'message',
+      payload: { text: '[session-start]' },
+      createdAt: at(0),
+    });
+    for (let turnIndex = 0; turnIndex < session.transcript.length; turnIndex++) {
+      const turn = session.transcript[turnIndex]!;
+      items.push({
+        id: `${threadId}-i${String(turnIndex + 1).padStart(3, '0')}`,
+        threadId,
+        role: turn.role,
+        kind: 'message',
+        payload: { text: turn.md },
+        createdAt: at(turnIndex + 1),
+      });
+    }
+    items.push({
+      id: `${threadId}-i${String(session.transcript.length + 1).padStart(3, '0')}`,
+      threadId,
+      role: 'agent',
+      kind: 'wrap',
+      payload: {
+        day: session.roadmapDay,
+        summary_md: seeded.summaryMd,
+        concept_deltas: seeded.conceptDeltas,
+      },
+      createdAt: seeded.endedAt,
+    });
+  }
+
+  await prisma.thread.createMany({ data: threads });
+  await prisma.itemMirror.createMany({ data: items });
+  return threadIdByCommit;
+}
+
 async function createAlexTrackRows(
   prisma: PrismaClient,
   userId: string,
@@ -313,7 +397,8 @@ async function createAlexTrackRows(
   const pythonIntake = trackIntakeSchema.parse({
     subject: 'Python DS&A',
     goalType: 'interview',
-    subtopics: 'Python fluency plus common arrays, maps, pointers, trees, graphs, heaps, and DP patterns.',
+    subtopics:
+      'Python fluency plus common arrays, maps, pointers, trees, graphs, heaps, and DP patterns.',
     currentLevel: 'beginner',
     style: 'drill-first',
     priorKnowledge: 'Comfortable solving problems in JavaScript; new to interview-style Python.',

@@ -206,19 +206,17 @@ export class TrackService {
   }
 
   private kickoff(track: Track, thread: Thread, input: string = PLAN_KICKOFF_INPUT): void {
-    void this.threads
-      .startSystemTurn(thread, input, { caption: 'Drafting your roadmap…' })
-      .then(
-        () => this.reconcileGeneration(track.userId, track.slug),
-        async (err: unknown) => {
-          this.logger.warn({ err, track: track.slug }, 'roadmap generation turn failed');
-          this.failureReasons.set(
-            this.failureKey(track.userId, track.slug),
-            'the generation turn errored before finishing — the plan files may be absent or partial',
-          );
-          await this.failGeneration(track.userId, track.slug);
-        },
-      );
+    void this.threads.startSystemTurn(thread, input, { caption: 'Drafting your roadmap…' }).then(
+      () => this.reconcileGeneration(track.userId, track.slug),
+      async (err: unknown) => {
+        this.logger.warn({ err, track: track.slug }, 'roadmap generation turn failed');
+        this.failureReasons.set(
+          this.failureKey(track.userId, track.slug),
+          'the generation turn errored before finishing — the plan files may be absent or partial',
+        );
+        await this.failGeneration(track.userId, track.slug);
+      },
+    );
   }
 
   /** Parses committed plan artifacts after the plan turn settles. */
@@ -372,8 +370,13 @@ export class TrackService {
 
     const [threads, logs] = await Promise.all([
       this.prisma.thread.findMany({
-        where: { userId, trackSlug: slug, mode: 'learn', roadmapDay: { not: null } },
-        select: { roadmapDay: true },
+        where: {
+          userId,
+          trackSlug: slug,
+          mode: { in: ['learn', 'review'] },
+          roadmapDay: { not: null },
+        },
+        select: { roadmapDay: true, createdAt: true },
       }),
       this.sessionLogs(userId, slug),
     ]);
@@ -382,8 +385,13 @@ export class TrackService {
       if (thread.roadmapDay !== null)
         counts.set(thread.roadmapDay, (counts.get(thread.roadmapDay) ?? 0) + 1);
     }
+    const threadSittings = new Set(
+      threads.map(
+        (thread) => `${thread.roadmapDay!}\u0000${localDate(thread.createdAt, context.timezone)}`,
+      ),
+    );
     for (const log of logs) {
-      if (log.roadmapDay !== null)
+      if (log.roadmapDay !== null && !threadSittings.has(`${log.roadmapDay}\u0000${log.date}`))
         counts.set(log.roadmapDay, (counts.get(log.roadmapDay) ?? 0) + 1);
     }
     const dates = plannedDates(roadmap, context.today);
@@ -415,9 +423,14 @@ export class TrackService {
 
   async sessions(userId: string, slug: string): Promise<TrackSessions> {
     await this.ownedTrack(userId, slug);
-    const [threads, events, logs] = await Promise.all([
+    const [threads, events, logs, user] = await Promise.all([
       this.prisma.thread.findMany({
-        where: { userId, trackSlug: slug, mode: 'learn', roadmapDay: { not: null } },
+        where: {
+          userId,
+          trackSlug: slug,
+          mode: { in: ['learn', 'review'] },
+          roadmapDay: { not: null },
+        },
         orderBy: { lastActiveAt: 'desc' },
       }),
       this.prisma.activityEvent.findMany({
@@ -425,6 +438,7 @@ export class TrackService {
         select: { meta: true },
       }),
       this.sessionLogs(userId, slug),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { timezone: true } }),
     ]);
     const commits = new Map<string, number>();
     for (const event of events) {
@@ -433,6 +447,15 @@ export class TrackService {
         commits.set(meta.threadId, (commits.get(meta.threadId) ?? 0) + 1);
       }
     }
+    const timezone = user?.timezone ?? 'UTC';
+    const threadSittings = new Set(
+      threads.map(
+        (thread) => `${thread.roadmapDay!}\u0000${localDate(thread.createdAt, timezone)}`,
+      ),
+    );
+    const threadlessLogs = logs.filter(
+      (log) => log.roadmapDay === null || !threadSittings.has(`${log.roadmapDay}\u0000${log.date}`),
+    );
     const merged: Array<{ sort: number; value: TrackSessions['sessions'][number] }> = [
       ...threads.map((thread) => ({
         sort: thread.lastActiveAt.getTime(),
@@ -443,7 +466,7 @@ export class TrackService {
           commitCount: commits.get(thread.id) ?? 0,
         },
       })),
-      ...logs.map((log) => ({
+      ...threadlessLogs.map((log) => ({
         sort: Date.parse(`${log.date}T12:00:00Z`),
         value: {
           kind: 'log' as const,
@@ -590,13 +613,14 @@ export class TrackService {
   private async modelContext(userId: string): Promise<{
     model: Awaited<ReturnType<WorkspaceManager['readLearnerModel']>>;
     today: string;
+    timezone: string;
   }> {
     const [model, user] = await Promise.all([
       this.workspaces.readLearnerModel(userId),
       this.prisma.user.findUnique({ where: { id: userId }, select: { timezone: true } }),
     ]);
     const timezone = model.profile?.frontmatter.timezone ?? user?.timezone ?? 'UTC';
-    return { model, today: localDate(this.now(), timezone) };
+    return { model, today: localDate(this.now(), timezone), timezone };
   }
 
   private async summaryFor(

@@ -190,6 +190,9 @@ export const DAILY_QUOTA_MESSAGE =
   "This profile has used today's turn allowance. It resets at midnight " +
   '(profile local time) — everything learned so far is saved.';
 
+/** Archived transcripts are replay-only; revision always starts a fresh thread. */
+export const ARCHIVED_SESSION_MESSAGE = 'This session has ended — start a revision to continue.';
+
 /**
  * Thrown by startTurn when the profile's daily USER-turn quota is exhausted.
  * The manager has already emitted the terminal turn.error to the sockets;
@@ -496,6 +499,15 @@ export class ThreadManager implements ExamThreadService, TrackThreadService {
    * fires-and-forgets with a turn.error catch).
    */
   startTurn(thread: Thread, userText: string): Promise<void> {
+    if (thread.status === 'archived') {
+      this.emitTurnEvent(thread, {
+        type: 'turn.error',
+        threadId: thread.id,
+        message: ARCHIVED_SESSION_MESSAGE,
+        retryable: false,
+      });
+      return Promise.resolve();
+    }
     return this.enqueueTurn(thread, userText, 'user');
   }
 
@@ -821,6 +833,7 @@ export class ThreadManager implements ExamThreadService, TrackThreadService {
    * (plans/03 §3.1 re-resume rule).
    */
   private async ensureResumed(thread: Thread): Promise<void> {
+    if (thread.status !== 'active') return;
     this.attach(thread);
     if (this.resumedThreads.has(thread.codexThreadId)) return;
     const pending = this.pendingResumes.get(thread.codexThreadId);

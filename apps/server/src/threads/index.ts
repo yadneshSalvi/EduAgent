@@ -3,6 +3,7 @@
  * workspaces, memory pipeline, and WS gateway together per thread.
  */
 export {
+  ARCHIVED_SESSION_MESSAGE,
   DAILY_QUOTA_MESSAGE,
   DailyTurnQuotaError,
   GREETING_INPUT,

@@ -46,7 +46,17 @@ export const ALEX_TIMEZONE = 'America/Los_Angeles';
 const DEFAULT_RNG_SEED = 0xed0a6e47;
 /** Extra no-assessment commits per day (notes-only recall checks). */
 const FILLER_COUNTS: Record<number, number> = {
-  20: 2, 19: 2, 18: 1, 16: 2, 15: 1, 12: 1, 11: 1, 6: 1, 3: 1, 1: 1, 0: 2,
+  20: 2,
+  19: 2,
+  18: 1,
+  16: 2,
+  15: 1,
+  12: 1,
+  11: 1,
+  6: 1,
+  3: 1,
+  1: 1,
+  0: 2,
 };
 const MAX_EVIDENCE = 4;
 /** Deltas shown in the exam commit headline (the rest ride in the body). */
@@ -79,6 +89,7 @@ export interface SeededCommit {
 
 export interface AlexSeedResult {
   commits: SeededCommit[];
+  sessions: SeededSessionResult[];
   /**
    * Track readiness at the exam moment, before/after grading (1dp), plus the
    * weakest-at-exam targeting — seed.ts mirrors these into the graded Exam DB
@@ -86,6 +97,15 @@ export interface AlexSeedResult {
    */
   exam: { before: number; after: number; delta: number; targeting: ExamTarget[] };
   today: string;
+}
+
+export interface SeededSessionResult {
+  session: SessionSeed;
+  startedAt: Date;
+  endedAt: Date;
+  commitSha: string;
+  summaryMd: string;
+  conceptDeltas: Array<{ topic: string; concept: string; from: number; to: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +151,19 @@ type SeedEvent =
       roadmapDay: RoadmapDaySeed;
     }
   | { kind: 'track-add'; day: number; order: number }
-  | { kind: 'assess'; day: number; order: number; topic: string; steps: Array<{ concept: ConceptSeed; step: ArcStep }> }
-  | { kind: 'exam'; day: number; order: number; steps: Array<{ concept: ConceptSeed; step: ArcStep }> }
+  | {
+      kind: 'assess';
+      day: number;
+      order: number;
+      topic: string;
+      steps: Array<{ concept: ConceptSeed; step: ArcStep }>;
+    }
+  | {
+      kind: 'exam';
+      day: number;
+      order: number;
+      steps: Array<{ concept: ConceptSeed; step: ArcStep }>;
+    }
   | { kind: 'misc-open'; day: number; order: number; misc: MisconceptionSeed }
   | { kind: 'filler'; day: number; order: number; topic: string }
   | { kind: 'wrap'; day: number; order: number; session: SessionSeed };
@@ -158,6 +189,7 @@ class AlexGenerator {
   private readonly notes = new Map<string, string[]>(); // topic → lines
   private readonly roadmaps = new Map<string, RoadmapFile>();
   private readonly commits: SeededCommit[] = [];
+  private readonly sessions: SeededSessionResult[] = [];
   private readonly learnPicker: VariedPicker;
   private readonly reviewPicker: VariedPicker;
   private readonly fillerNotePicker: VariedPicker;
@@ -197,13 +229,40 @@ class AlexGenerator {
     if (dueToday !== 3) {
       throw new Error(`seedAlexWorkspace: ${dueToday} SRS items due today, expected exactly 3`);
     }
-    return { commits: this.commits, exam: this.examReadiness, today: this.clock.today };
+    this.validateSeededSessions();
+    return {
+      commits: this.commits,
+      sessions: this.sessions,
+      exam: this.examReadiness,
+      today: this.clock.today,
+    };
   }
 
   /** Guard the hand-authored session/day clubbing that drives roadmap progress. */
   private validateScreenplay(): void {
+    for (const session of SESSIONS) {
+      if (session.transcript.length < 5 || session.transcript.length > 9) {
+        throw new Error(`seedAlexWorkspace: ${session.slug} transcript must contain 5–9 turns`);
+      }
+      if (session.transcript[0]?.role !== 'agent' || session.transcript.at(-1)?.role !== 'agent') {
+        throw new Error(
+          `seedAlexWorkspace: ${session.slug} transcript must open and close with the tutor`,
+        );
+      }
+      for (let index = 0; index < session.transcript.length; index++) {
+        const turn = session.transcript[index]!;
+        if (index > 0 && turn.role === session.transcript[index - 1]!.role) {
+          throw new Error(`seedAlexWorkspace: ${session.slug} transcript roles must alternate`);
+        }
+        if (turn.role === 'agent' && wordCount(turn.md) > 120) {
+          throw new Error(`seedAlexWorkspace: ${session.slug} tutor turn exceeds 120 words`);
+        }
+      }
+    }
     for (const roadmap of ROADMAPS) {
-      for (const day of roadmap.days.filter((candidate) => candidate.completedOnDay !== undefined)) {
+      for (const day of roadmap.days.filter(
+        (candidate) => candidate.completedOnDay !== undefined,
+      )) {
         const mapped = SESSIONS.filter(
           (session) =>
             session.mode !== 'exam' &&
@@ -228,6 +287,26 @@ class AlexGenerator {
     }
   }
 
+  private validateSeededSessions(): void {
+    if (this.sessions.length !== SESSIONS.length) {
+      throw new Error(
+        `seedAlexWorkspace: ${this.sessions.length} seeded transcripts, expected ${SESSIONS.length}`,
+      );
+    }
+    for (const seeded of this.sessions) {
+      const commit = this.commits.find((candidate) => candidate.sha === seeded.commitSha);
+      if (!commit) {
+        throw new Error(`seedAlexWorkspace: ${seeded.session.slug} has no session commit`);
+      }
+      const expected = commit.deltas.map((delta) => ({ topic: commit.topic, ...delta }));
+      if (JSON.stringify(seeded.conceptDeltas) !== JSON.stringify(expected)) {
+        throw new Error(
+          `seedAlexWorkspace: ${seeded.session.slug} wrap deltas differ from its session commit`,
+        );
+      }
+    }
+  }
+
   // ------------------------------------------------------------ event plan
 
   private buildEvents(): SeedEvent[] {
@@ -245,7 +324,10 @@ class AlexGenerator {
     // Assessment events from the concept arcs, merging same-day groups and
     // all exam-kind steps into single multi-delta commits.
     const examSteps: Array<{ concept: ConceptSeed; step: ArcStep }> = [];
-    const grouped = new Map<string, { topic: string; steps: Array<{ concept: ConceptSeed; step: ArcStep }> }>();
+    const grouped = new Map<
+      string,
+      { topic: string; steps: Array<{ concept: ConceptSeed; step: ArcStep }> }
+    >();
     for (const topic of TOPICS) {
       for (const concept of topic.concepts) {
         for (const step of concept.arc) {
@@ -342,7 +424,12 @@ class AlexGenerator {
       } else {
         const hour = 7.6 + (idx * 13.2) / Math.max(n, 1) + (this.rng() - 0.5) * 0.6;
         const h = Math.min(22, Math.max(7, hour));
-        instant = this.clock.at(e.day, Math.floor(h), Math.floor((h % 1) * 60), randInt(this.rng, 0, 59));
+        instant = this.clock.at(
+          e.day,
+          Math.floor(h),
+          Math.floor((h % 1) * 60),
+          randInt(this.rng, 0, 59),
+        );
       }
       // Strict monotonicity keeps git log order == chronological order.
       if (instant.getTime() <= prevMs) instant = new Date(prevMs + 61_000);
@@ -473,7 +560,10 @@ class AlexGenerator {
     await this.writeMastery(topic, instant);
     await this.writeQueue();
     if (touchedMisc) await this.writeMisconceptions(topic);
-    await this.commit(`${kind}(${topic}): ${headline}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`, instant);
+    await this.commit(
+      `${kind}(${topic}): ${headline}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`,
+      instant,
+    );
   }
 
   private async executeExam(
@@ -542,7 +632,12 @@ class AlexGenerator {
     await this.writeMastery('sql', instant);
     await this.writeQueue();
     await this.writeExamRecord(day, deltas);
-    await this.commit(`exam(sql): ${headline}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`, instant);
+    const commit = await this.commit(
+      `exam(sql): ${headline}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`,
+      instant,
+    );
+    const session = SESSIONS.find((candidate) => candidate.mode === 'exam');
+    if (session) this.recordSession(session, instant, commit);
   }
 
   private async executeMiscOpen(misc: MisconceptionSeed, instant: Date): Promise<void> {
@@ -569,8 +664,7 @@ class AlexGenerator {
     // Never pick the due-today (fading) concepts: a "warm-up rep on
     // window-functions" the same morning the dashboard calls it about-to-be-
     // forgotten would contradict the demo's decay story.
-    const eligible = (c: ConceptState): boolean =>
-      c.stepIdx > 0 && c.spec.srsDueInDays !== 0;
+    const eligible = (c: ConceptState): boolean => c.stepIdx > 0 && c.spec.srsDueInDays !== 0;
     let pool = [...this.concepts.values()].filter((c) => c.topic === topic && eligible(c));
     if (pool.length === 0) {
       topic = 'sql';
@@ -601,10 +695,24 @@ class AlexGenerator {
       `${session.duration} sitting ${scope}`,
       ...(session.nextTime ? [`Next: ${session.nextTime}`] : []),
     ];
-    await this.commit(
+    const commit = await this.commit(
       `${type}(${session.topics[0]}): ${headline}\n\n${bullets.map((b) => `- ${b}`).join('\n')}`,
       instant,
     );
+    this.recordSession(session, instant, commit);
+  }
+
+  private recordSession(session: SessionSeed, endedAt: Date, commit: SeededCommit): void {
+    const durationMs = parseDurationMinutes(session.duration) * 60_000;
+    const summaryMd = [...session.transcript].reverse().find((turn) => turn.role === 'agent')!.md;
+    this.sessions.push({
+      session,
+      startedAt: new Date(endedAt.getTime() - durationMs),
+      endedAt,
+      commitSha: commit.sha,
+      summaryMd,
+      conceptDeltas: commit.deltas.map((delta) => ({ topic: commit.topic, ...delta })),
+    });
   }
 
   // ------------------------------------------------------- state mutation
@@ -817,7 +925,9 @@ class AlexGenerator {
   private async writeTrack(track: TrackSeed): Promise<void> {
     const targetDate =
       track.targetDate ??
-      (track.targetInDays === undefined ? undefined : addDays(this.clock.today, track.targetInDays));
+      (track.targetInDays === undefined
+        ? undefined
+        : addDays(this.clock.today, track.targetInDays));
     if (targetDate === undefined) {
       throw new Error(`seedAlexWorkspace: ${track.track} has no target date`);
     }
@@ -828,7 +938,11 @@ class AlexGenerator {
       'items:',
     ];
     for (const item of track.items) {
-      lines.push(`  - concept: ${item.concept}`, `    topic: ${item.topic}`, `    weight: ${item.weight}`);
+      lines.push(
+        `  - concept: ${item.concept}`,
+        `    topic: ${item.topic}`,
+        `    weight: ${item.weight}`,
+      );
     }
     await this.write(`tracks/${track.track}/track.yaml`, lines.join('\n') + '\n');
   }
@@ -900,7 +1014,9 @@ class AlexGenerator {
     ];
     const lines = [
       ...open.sort((a, b) => b.firstSeen.localeCompare(a.firstSeen)).flatMap(block),
-      ...resolved.sort((a, b) => (b.resolvedOn ?? '').localeCompare(a.resolvedOn ?? '')).flatMap(block),
+      ...resolved
+        .sort((a, b) => (b.resolvedOn ?? '').localeCompare(a.resolvedOn ?? ''))
+        .flatMap(block),
     ];
     await this.write(`topics/${topic}/misconceptions.md`, lines.join('\n').trimEnd() + '\n');
   }
@@ -925,23 +1041,26 @@ class AlexGenerator {
       '{examDelta}',
       `+${this.examReadiness.delta.toFixed(1)}`,
     );
-    await this.write(`sessions/${date}-${session.slug}.md`, [
-      '---',
-      `date: ${date}`,
-      `mode: ${session.mode}`,
-      `track: ${session.track}`,
-      `roadmap_day: ${session.roadmapDay}`,
-      `title: ${JSON.stringify(session.title)}`,
-      `topics: [${session.topics.join(', ')}]`,
-      `duration_estimate: ${session.duration}`,
-      `concepts_touched: [${session.concepts.join(', ')}]`,
-      // Quoted: pointers may contain YAML-significant characters (colons).
-      ...(session.nextTime ? [`next_time: ${JSON.stringify(session.nextTime)}`] : []),
-      '---',
-      '',
-      narrative,
-      '',
-    ].join('\n'));
+    await this.write(
+      `sessions/${date}-${session.slug}.md`,
+      [
+        '---',
+        `date: ${date}`,
+        `mode: ${session.mode}`,
+        `track: ${session.track}`,
+        `roadmap_day: ${session.roadmapDay}`,
+        `title: ${JSON.stringify(session.title)}`,
+        `topics: [${session.topics.join(', ')}]`,
+        `duration_estimate: ${session.duration}`,
+        `concepts_touched: [${session.concepts.join(', ')}]`,
+        // Quoted: pointers may contain YAML-significant characters (colons).
+        ...(session.nextTime ? [`next_time: ${JSON.stringify(session.nextTime)}`] : []),
+        '---',
+        '',
+        narrative,
+        '',
+      ].join('\n'),
+    );
   }
 
   private async writeExamRecord(
@@ -996,13 +1115,13 @@ class AlexGenerator {
 
   // ---------------------------------------------------------------- commit
 
-  private async commit(message: string, instant: Date): Promise<void> {
+  private async commit(message: string, instant: Date): Promise<SeededCommit> {
     const parsed = parseCommit(message);
     if (parsed === null) {
       throw new Error(`seedAlexWorkspace produced an off-grammar commit:\n${message}`);
     }
     const sha = await this.git.commitAll(message, { backdate: instant });
-    this.commits.push({
+    const commit = {
       sha,
       instant,
       type: parsed.type,
@@ -1010,9 +1129,18 @@ class AlexGenerator {
       headline: parsed.headline,
       bullets: parsed.bullets,
       deltas: parsed.deltas,
-    });
+    };
+    this.commits.push(commit);
+    return commit;
   }
 }
 
 const lowerFirst = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
 const round1 = (n: number): number => Math.round(n * 10) / 10;
+const wordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length;
+
+function parseDurationMinutes(duration: string): number {
+  const match = /^(\d+)m$/.exec(duration);
+  if (!match) throw new Error(`seedAlexWorkspace: unsupported session duration ${duration}`);
+  return Number(match[1]);
+}

@@ -468,9 +468,9 @@ describe('TrackService', () => {
     expect(threads.kickoffInputs.at(-1)).toBe('[plan-roadmap]');
 
     await service.reconcileGeneration(USER, 'sql-interview'); // no plan files committed
-    expect(
-      (await prisma.track.findFirstOrThrow({ where: { slug: 'sql-interview' } })).status,
-    ).toBe('failed');
+    expect((await prisma.track.findFirstOrThrow({ where: { slug: 'sql-interview' } })).status).toBe(
+      'failed',
+    );
 
     const retried = await service.generate(USER, 'sql-interview');
     expect(retried.planThreadId).toBe(created.planThreadId);
@@ -480,7 +480,7 @@ describe('TrackService', () => {
     expect(retryInput).toContain('exactly "sql-interview"');
   });
 
-  it('merges live threads with session logs and counts commits in JS', async () => {
+  it('deduplicates thread-backed logs, keeps thread-less logs, and counts commits', async () => {
     await activeTrack('sql-interview');
     const thread = await prisma.thread.create({
       data: {
@@ -493,6 +493,8 @@ describe('TrackService', () => {
         intent: 'revise',
         title: 'Day 2 — revisited',
         sessionToken: 'track-session-token-1',
+        createdAt: new Date('2026-07-20T10:00:00Z'),
+        lastActiveAt: new Date('2026-07-20T10:25:00Z'),
       },
     });
     await prisma.activityEvent.create({
@@ -502,6 +504,10 @@ describe('TrackService', () => {
       'sessions/2026-07-20-sql-joins.md',
       `---\ndate: 2026-07-20\nmode: learn\ntrack: sql-interview\nroadmap_day: 2\ntitle: Join practice\ntopics: [sql]\nduration_estimate: 25m\nconcepts_touched: [joins]\n---\nWorked on joins.\n`,
     );
+    await write(
+      'sessions/2026-07-19-sql-joins-followup.md',
+      `---\ndate: 2026-07-19\nmode: learn\ntrack: sql-interview\nroadmap_day: 3\ntitle: Thread-less join follow-up\ntopics: [sql]\nduration_estimate: 20m\nconcepts_touched: [joins]\n---\nWorked on joins without a thread.\n`,
+    );
     const merged = await service.sessions(USER, 'sql-interview');
     expect(merged.sessions.map((session) => session.kind).sort()).toEqual(['log', 'thread']);
     expect(merged.sessions.find((session) => session.kind === 'thread')).toMatchObject({
@@ -510,10 +516,12 @@ describe('TrackService', () => {
       thread: { intent: 'revise' },
     });
     expect(merged.sessions.find((session) => session.kind === 'log')).toMatchObject({
-      roadmapDay: 2,
-      title: 'Join practice',
+      roadmapDay: 3,
+      title: 'Thread-less join follow-up',
     });
-    expect((await service.detail(USER, 'sql-interview')).roadmap?.days[1]?.sessionCount).toBe(2);
+    const roadmap = (await service.detail(USER, 'sql-interview')).roadmap;
+    expect(roadmap?.days[1]?.sessionCount).toBe(1);
+    expect(roadmap?.days[2]?.sessionCount).toBe(1);
   });
 
   it('waits behind the real per-user queue and emits the server commit exactly once', async () => {
