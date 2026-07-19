@@ -17,7 +17,11 @@ export {
 } from './modes/exam-grade.js';
 export { buildLearnInstructions, type LearnModeOptions } from './modes/learn.js';
 export { buildOnboardingInstructions, type OnboardingModeOptions } from './modes/onboarding.js';
-export { buildPlanInstructions, PLAN_FILE_TEMPLATES, type PlanModeOptions } from './modes/plan.js';
+export {
+  buildPlanInstructions,
+  buildPlanFileTemplates,
+  type PlanModeOptions,
+} from './modes/plan.js';
 export {
   buildReviewInstructions,
   formatReviewDueNotes,

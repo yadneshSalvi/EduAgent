@@ -42,6 +42,7 @@ function recordingSink() {
 class FakeTrackThreads implements TrackThreadService {
   constructor(private readonly prisma: PrismaClient) {}
   readonly kickoffs: string[] = [];
+  readonly kickoffInputs: string[] = [];
   runExclusive<T>(_userId: string, job: () => Promise<T>): Promise<T> {
     return job();
   }
@@ -78,8 +79,9 @@ class FakeTrackThreads implements TrackThreadService {
       },
     });
   }
-  startSystemTurn(thread: Thread): Promise<void> {
+  startSystemTurn(thread: Thread, text: string): Promise<void> {
     this.kickoffs.push(thread.id);
+    this.kickoffInputs.push(text);
     return new Promise(() => {}); // reconciliation is driven explicitly by these unit tests
   }
   ensureThread(): never {
@@ -290,6 +292,135 @@ describe('TrackService', () => {
         (record) => record.target === 'user' && record.event.type === 'memory.commit',
       ),
     ).toHaveLength(4);
+  });
+
+  it('reflects completion immediately even when another directory shadows the slug (QA F2)', async () => {
+    await activeTrack('sql-interview', true);
+    // Impostor from a failed generation: an alphabetically EARLIER directory
+    // whose files claim `track: sql-interview` — before the dir↔field guard it
+    // shadowed the real roadmap in every `.find()`, so completion never showed.
+    await write(
+      'tracks/a-failed-attempt/track.yaml',
+      'track: sql-interview\ndisplay_name: Impostor\nitems:\n  - concept: joins\n    topic: sql\n    weight: 1\n',
+    );
+    await write(
+      'tracks/a-failed-attempt/roadmap.yaml',
+      [
+        'track: sql-interview',
+        'created: 2026-07-01',
+        'schedule:',
+        '  study_days: [mon, wed, fri]',
+        '  minutes_per_day: 45',
+        '  start_date: 2026-07-01',
+        'days:',
+        ...Array.from({ length: 5 }, (_, index) =>
+          [
+            `  - day: ${index + 1}`,
+            `    title: Impostor ${index + 1}`,
+            '    status: upcoming',
+            '    topics:',
+            '      - topic: sql',
+            '        concepts: [joins]',
+            '    subtopics: [A, B]',
+          ].join('\n'),
+        ),
+      ].join('\n') + '\n',
+    );
+    await workspaces.git(USER).commitAll('system(general): leftover impostor files');
+
+    const before = await service.detail(USER, 'sql-interview');
+    expect(before.completedDays).toEqual([1]); // the REAL roadmap, not the impostor's
+    expect(before.headDay).toBe(2);
+
+    const after = await service.completeDay(USER, 'sql-interview', 2);
+    expect(after.completedDays).toEqual([1, 2]);
+    expect(after.headDay).toBe(3);
+    const listed = await service.list(USER);
+    expect(listed.find((track) => track.slug === 'sql-interview')?.completedDays).toEqual([1, 2]);
+
+    const model = await workspaces.readLearnerModel(USER);
+    expect(model.needsRepair).toContain('tracks/a-failed-attempt/roadmap.yaml');
+    expect(model.needsRepair).toContain('tracks/a-failed-attempt/track.yaml');
+  });
+
+  it('normalizes a parroted track slug during reconciliation (QA F1)', async () => {
+    const slug = 'sql-for-backend-interviews';
+    await workspaces.ensureWorkspace(USER);
+    await write(
+      `tracks/${slug}/track.yaml`,
+      'track: sql-interview\ndisplay_name: SQL for backend interviews\nitems:\n  - concept: joins\n    topic: sql\n    weight: 1.5\n',
+    );
+    await write(
+      `tracks/${slug}/roadmap.yaml`,
+      [
+        'track: sql-interview',
+        'created: 2026-07-19',
+        'schedule:',
+        '  study_days: [mon, wed, fri]',
+        '  minutes_per_day: 45',
+        '  start_date: 2026-07-19',
+        'days:',
+        ...Array.from({ length: 5 }, (_, index) =>
+          [
+            `  - day: ${index + 1}`,
+            `    title: Topic ${index + 1}`,
+            '    status: upcoming',
+            '    topics:',
+            '      - topic: sql',
+            '        concepts: [joins]',
+            '    subtopics: [A, B]',
+          ].join('\n'),
+        ),
+      ].join('\n') + '\n',
+    );
+    await workspaces.git(USER).commitAll(`plan(${slug}): create roadmap — 5 days`);
+    await prisma.track.create({
+      data: {
+        userId: USER,
+        slug,
+        title: 'SQL for backend interviews',
+        goalType: 'interview',
+        status: 'generating',
+        intake: INTAKE as Prisma.InputJsonValue,
+        accent: 'violet',
+      },
+    });
+
+    await service.reconcileGeneration(USER, slug);
+
+    expect((await prisma.track.findFirstOrThrow({ where: { slug } })).status).toBe('active');
+    const head = (await workspaces.git(USER).log({ maxCount: 1 }))[0];
+    expect(head?.message).toContain(`plan(${slug}): normalize track slug`);
+    for (const file of ['roadmap.yaml', 'track.yaml']) {
+      expect(await workspaces.git(USER).fileAtRef('HEAD', `tracks/${slug}/${file}`)).toContain(
+        `track: ${slug}`,
+      );
+    }
+    expect((await service.detail(USER, slug)).roadmap).not.toBeNull();
+    expect(
+      sink.records.some(
+        (record) =>
+          record.event.type === 'memory.commit' &&
+          record.event.commit.headline.includes('normalize track slug'),
+      ),
+    ).toBe(true);
+  });
+
+  it('feeds the reconciliation error into the retry kickoff (QA F1b)', async () => {
+    const created = await service.create(USER, INTAKE);
+    expect(threads.kickoffInputs.at(-1)).toBe('[plan-roadmap]');
+
+    await service.reconcileGeneration(USER, 'sql-interview'); // no plan files committed
+    expect(
+      (await prisma.track.findFirstOrThrow({ where: { slug: 'sql-interview' } })).status,
+    ).toBe('failed');
+
+    const retried = await service.generate(USER, 'sql-interview');
+    expect(retried.planThreadId).toBe(created.planThreadId);
+    const retryInput = threads.kickoffInputs.at(-1) ?? '';
+    expect(retryInput).toContain('[plan-roadmap-retry]');
+    expect(retryInput).toContain('missing at HEAD');
+    expect(retryInput).toContain('exactly "sql-interview"');
   });
 
   it('merges live threads with session logs and counts commits in JS', async () => {

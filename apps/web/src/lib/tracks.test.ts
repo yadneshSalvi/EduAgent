@@ -39,3 +39,14 @@ describe('roadmap state derivation', () => {
 // Compile-time guard: the helper consumes the day shape returned by TrackDetail.
 const _detailDay: NonNullable<TrackDetail['roadmap']>['days'][number] = day(1);
 void _detailDay;
+
+describe('isTrackNotFound (QA F3)', () => {
+  it('is true only for ApiError 404', async () => {
+    const { ApiError } = await import('@/lib/api');
+    const { isTrackNotFound } = await import('./tracks');
+    expect(isTrackNotFound(new ApiError(404, 'not_found', 'No track'))).toBe(true);
+    expect(isTrackNotFound(new ApiError(503, 'not_ready', 'booting'))).toBe(false);
+    expect(isTrackNotFound(new Error('network'))).toBe(false);
+    expect(isTrackNotFound(null)).toBe(false);
+  });
+});

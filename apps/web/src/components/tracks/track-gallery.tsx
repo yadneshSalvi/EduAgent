@@ -7,6 +7,7 @@ import type { DashboardData, TrackSummary } from '@eduagent/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDashboard } from '@/hooks/use-dashboard';
 import { useTracks } from '@/hooks/use-tracks';
+import { useUserSocketEvents } from '@/components/memory/memory-commit-provider';
 import { retryTrackGeneration } from '@/lib/api';
 import { commitBadge } from '@/lib/commit-format';
 import { Button } from '@/components/ui/button';
@@ -125,6 +126,7 @@ function TrackCard({ track, targetDate }: { track: TrackSummary; targetDate?: st
               .then(() => {
                 setRetrying(false);
                 void queryClient.invalidateQueries({ queryKey: ['tracks'] });
+                void queryClient.invalidateQueries({ queryKey: ['tracks', track.slug] });
               })
               .catch(() => {
                 setRetrying(false);
@@ -209,6 +211,17 @@ function GlobalStrip({ data }: { data: DashboardData | undefined }) {
 export function TrackGallery() {
   const tracks = useTracks();
   const dashboard = useDashboard();
+  const queryClient = useQueryClient();
+
+  // Status flips without a commit (generating→failed, retry→generating) never
+  // reach publishCommit's invalidation — refresh the gallery on track.updated
+  // so a retried card resumes updating (QA F6).
+  useUserSocketEvents((event) => {
+    if (event.type === 'track.updated') {
+      void queryClient.invalidateQueries({ queryKey: ['tracks'] });
+      void queryClient.invalidateQueries({ queryKey: ['tracks', event.slug] });
+    }
+  });
 
   if (tracks.isPending) {
     return (

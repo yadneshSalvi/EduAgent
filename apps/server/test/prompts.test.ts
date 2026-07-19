@@ -9,7 +9,7 @@ import {
 } from '@eduagent/shared';
 import { describe, expect, it } from 'vitest';
 import { ONBOARDING_FILE_TEMPLATES } from '../src/prompts/modes/onboarding.js';
-import { PLAN_FILE_TEMPLATES } from '../src/prompts/modes/plan.js';
+import { buildPlanFileTemplates } from '../src/prompts/modes/plan.js';
 import {
   buildContextEnvelope,
   buildLearnInstructions,
@@ -117,30 +117,55 @@ describe('mode templates (plans/03 §6.3–6.4)', () => {
     expect(() => srsQueueFileSchema.parse(yamlLoad(ONBOARDING_FILE_TEMPLATES.srs))).not.toThrow();
   });
 
-  it('plan instructions carry valid inline templates and stay in budget', () => {
+  it('plan instructions carry valid INTERPOLATED templates and stay in budget', () => {
+    // The wizard slug rarely matches the subject verbatim (QA gate 1 F1): the
+    // templates must carry the REAL slug/title/schedule so a parroting model
+    // still produces files that pass reconciliation.
+    const intake = {
+      subject: 'SQL for backend interviews',
+      goalType: 'interview' as const,
+      sourceKind: 'job-description' as const,
+      sourceText: 'SQL joins and query optimization',
+      currentLevel: 'intermediate' as const,
+      style: 'drill-first' as const,
+      targetDate: '2026-09-02',
+      totalDays: 5,
+      studyDays: ['mon', 'wed', 'fri'] as Array<'mon' | 'wed' | 'fri'>,
+      minutesPerDay: 45,
+    };
+    const slug = 'sql-for-backend-interviews';
+    const today = '2026-07-19';
+    const templates = buildPlanFileTemplates({ trackSlug: slug, intake, today });
     const text = buildPlanInstructions({
       sessionToken: TOKEN,
-      trackSlug: 'sql-interview',
+      trackSlug: slug,
       needsProfile: true,
       learnerName: 'Alex',
-      intake: {
-        subject: 'SQL Interview Prep',
-        goalType: 'interview',
-        sourceKind: 'job-description',
-        sourceText: 'SQL joins and query optimization',
-        currentLevel: 'intermediate',
-        style: 'drill-first',
-        totalDays: 5,
-        studyDays: ['mon', 'wed', 'fri'],
-        minutesPerDay: 45,
-      },
+      intake,
+      today,
     });
-    for (const snippet of Object.values(PLAN_FILE_TEMPLATES)) expect(text).toContain(snippet);
-    expect(() => trackFileSchema.parse(yamlLoad(PLAN_FILE_TEMPLATES.track))).not.toThrow();
-    expect(() => roadmapFileSchema.parse(yamlLoad(PLAN_FILE_TEMPLATES.roadmap))).not.toThrow();
-    expect(() =>
-      trackBriefFrontmatterSchema.parse(yamlLoad(PLAN_FILE_TEMPLATES.briefFrontmatter)),
-    ).not.toThrow();
+    for (const snippet of Object.values(templates)) expect(text).toContain(snippet);
+
+    const parsedTrack = trackFileSchema.parse(yamlLoad(templates.track));
+    expect(parsedTrack.track).toBe(slug);
+    expect(parsedTrack.display_name).toBe(intake.subject);
+    expect(parsedTrack.target_date).toBe(intake.targetDate);
+    const parsedRoadmap = roadmapFileSchema.parse(yamlLoad(templates.roadmap));
+    expect(parsedRoadmap.track).toBe(slug);
+    expect(parsedRoadmap.schedule).toEqual({
+      study_days: intake.studyDays,
+      minutes_per_day: intake.minutesPerDay,
+      start_date: today,
+    });
+    const parsedBrief = trackBriefFrontmatterSchema.parse(yamlLoad(templates.briefFrontmatter));
+    expect(parsedBrief).toEqual({
+      track: slug,
+      goal_type: 'interview',
+      target_date: intake.targetDate,
+      source: 'job-description',
+    });
+
+    expect(text).toContain(`exactly \`${slug}\``);
     expect(text).toContain('profile: initialize learner model');
     expect(text).toContain('preferences.style: socratic');
     expect(estimateTokens(text)).toBeLessThanOrEqual(PLAN_INSTRUCTIONS_TOKEN_BUDGET);

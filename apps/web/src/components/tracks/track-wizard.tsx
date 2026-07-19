@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { motion, useReducedMotion } from 'motion/react';
 import { CalendarDays, Check, FileText, Loader2, Plus, X } from 'lucide-react';
 import type { TrackIntake } from '@eduagent/shared';
 import { createTrack } from '@/lib/api';
+import { useTracks } from '@/hooks/use-tracks';
 import {
   parseTrackWizardState,
   schedulePreview,
@@ -58,7 +60,7 @@ const STYLES: Array<{ label: string; value: NonNullable<TrackIntake['style']> }>
 
 const INITIAL_STATE: TrackWizardState = {
   subject: '',
-  goalType: 'explore',
+  goalType: null,
   targetDate: '',
   sourceText: '',
   subtopics: [],
@@ -118,7 +120,12 @@ export function TrackWizard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generated, setGenerated] = useState<{ slug: string; planThreadId: string } | null>(null);
+  const [customDuration, setCustomDuration] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // A reload mid-generation lands back here with a blank wizard (QA F4) —
+  // surface the in-flight track so the learner can resume its scene.
+  const tracksQuery = useTracks();
+  const generatingTrack = tracksQuery.data?.find((track) => track.status === 'generating') ?? null;
 
   const sourceBranch = state.goalType === 'interview' || state.goalType === 'exam';
   const preview = useMemo(
@@ -218,6 +225,24 @@ export function TrackWizard() {
         }}
       >
         <div className="min-h-0 flex-1 overflow-y-auto p-6 sm:p-10">
+          {generatingTrack ? (
+            <div className="mx-auto mb-6 w-full max-w-3xl">
+              <Card className="flex-row items-center gap-3 border-primary/40 p-4">
+                <span className="chip-dots text-primary" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <p className="min-w-0 flex-1 text-body-sm">
+                  A roadmap is being drafted for{' '}
+                  <span className="font-medium">{generatingTrack.title}</span>.
+                </p>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/app/tracks/${generatingTrack.slug}`}>Watch it live</Link>
+                </Button>
+              </Card>
+            </div>
+          ) : null}
           <motion.div
             key={step}
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
@@ -434,40 +459,46 @@ export function TrackWizard() {
                         <Button
                           key={label}
                           type="button"
-                          variant={state.totalDays === days ? 'secondary' : 'outline'}
-                          onClick={() =>
-                            setState((current) => ({ ...current, totalDays: Number(days) }))
+                          variant={
+                            !customDuration && state.totalDays === days ? 'secondary' : 'outline'
                           }
+                          onClick={() => {
+                            setCustomDuration(false);
+                            setState((current) => ({ ...current, totalDays: Number(days) }));
+                          }}
                         >
                           {label}
                         </Button>
                       ))}
                       <Button
                         type="button"
-                        variant={
-                          [5, 10, 15, 22].includes(state.totalDays) ? 'outline' : 'secondary'
-                        }
-                        onClick={() => setState((current) => ({ ...current, totalDays: 30 }))}
+                        variant={customDuration ? 'secondary' : 'outline'}
+                        onClick={() => {
+                          setCustomDuration(true);
+                          setState((current) => ({ ...current, totalDays: 30 }));
+                        }}
                       >
                         custom
                       </Button>
                     </div>
-                    <label className="flex max-w-xs items-center gap-3 font-mono text-caption text-muted-foreground">
-                      study days
-                      <input
-                        type="number"
-                        min={5}
-                        max={60}
-                        value={state.totalDays}
-                        onChange={(event) =>
-                          setState((current) => ({
-                            ...current,
-                            totalDays: Math.min(60, Math.max(5, Number(event.target.value) || 5)),
-                          }))
-                        }
-                        className="h-10 w-24 rounded-md border bg-background px-3 text-foreground"
-                      />
-                    </label>
+                    {customDuration ? (
+                      <label className="flex max-w-xs items-center gap-3 font-mono text-caption text-muted-foreground">
+                        study days
+                        <input
+                          type="number"
+                          min={5}
+                          max={60}
+                          value={state.totalDays}
+                          onChange={(event) =>
+                            setState((current) => ({
+                              ...current,
+                              totalDays: Math.min(60, Math.max(5, Number(event.target.value) || 5)),
+                            }))
+                          }
+                          className="h-10 w-24 rounded-md border bg-background px-3 text-foreground"
+                        />
+                      </label>
+                    ) : null}
                   </fieldset>
                   <fieldset className="flex flex-col gap-3">
                     <legend className="mb-3 text-body-sm font-medium">Study weekdays</legend>

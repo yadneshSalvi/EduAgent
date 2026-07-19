@@ -131,23 +131,39 @@ export class WorkspaceManager {
     );
     flag('profile.md', profileRead.needsRepair);
 
+    // A file only counts for the track whose DIRECTORY it sits in (QA gate 1
+    // F2): a mislabeled `track:` field (the F1 template-parroting failure)
+    // would otherwise shadow another track's real files in every
+    // `.find(candidate.track === slug)` lookup — completion flips the real
+    // file while reads keep resolving the impostor. Mismatches are excluded
+    // and flagged for repair.
     const tracks: TrackFile[] = [];
     for (const relPath of await this.discoverTrackFiles(dir, tracked, 'track.yaml')) {
+      const dirSlug = relPath.split('/')[1];
       const read = await readValidated(dir, git, relPath, (raw) =>
         parseYamlFile(trackFileSchema, raw),
       );
-      flag(relPath, read.needsRepair);
-      if (read.value) tracks.push(read.value);
+      if (read.value && read.value.track === dirSlug) {
+        flag(relPath, read.needsRepair);
+        tracks.push(read.value);
+      } else {
+        flag(relPath, true);
+      }
     }
     tracks.sort((a, b) => a.track.localeCompare(b.track));
 
     const roadmaps: RoadmapFile[] = [];
     for (const relPath of await this.discoverTrackFiles(dir, tracked, 'roadmap.yaml')) {
+      const dirSlug = relPath.split('/')[1];
       const read = await readValidated(dir, git, relPath, (raw) =>
         parseYamlFile(roadmapFileSchema, raw),
       );
-      flag(relPath, read.needsRepair);
-      if (read.value) roadmaps.push(read.value);
+      if (read.value && read.value.track === dirSlug) {
+        flag(relPath, read.needsRepair);
+        roadmaps.push(read.value);
+      } else {
+        flag(relPath, true);
+      }
     }
     roadmaps.sort((a, b) => a.track.localeCompare(b.track));
 

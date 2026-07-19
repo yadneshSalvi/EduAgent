@@ -5,7 +5,8 @@ export type LevelChoice = 'new' | 'rusty' | 'comfortable' | 'sharp';
 
 export interface TrackWizardState {
   subject: string;
-  goalType: TrackIntake['goalType'];
+  /** null until the learner picks a card (QA F5); unset submits as `explore`. */
+  goalType: TrackIntake['goalType'] | null;
   targetDate: string;
   sourceText: string;
   subtopics: string[];
@@ -26,15 +27,16 @@ const LEVEL_MAP: Record<LevelChoice, TrackIntake['currentLevel']> = {
 
 /** The UI owns friendly choices; this is the one boundary into the shared contract. */
 export function parseTrackWizardState(state: TrackWizardState) {
-  const sourceBranch = state.goalType === 'interview' || state.goalType === 'exam';
+  const goalType = state.goalType ?? 'explore';
+  const sourceBranch = goalType === 'interview' || goalType === 'exam';
   const targetDate = sourceBranch && state.targetDate ? state.targetDate : undefined;
   return trackIntakeSchema.safeParse({
     subject: state.subject.trim(),
-    goalType: state.goalType,
+    goalType,
     ...(sourceBranch && state.sourceText.trim()
       ? {
           sourceText: state.sourceText.trim(),
-          sourceKind: state.goalType === 'interview' ? 'job-description' : 'syllabus',
+          sourceKind: goalType === 'interview' ? 'job-description' : 'syllabus',
         }
       : {}),
     ...(!sourceBranch && state.subtopics.length > 0

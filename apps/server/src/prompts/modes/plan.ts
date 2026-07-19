@@ -8,73 +8,101 @@ export interface PlanModeOptions {
   intake: TrackIntake;
   needsProfile: boolean;
   learnerName: string;
+  /** YYYY-MM-DD used for `created`/`start_date` in the templates (tests pin it). */
+  today?: string;
 }
 
 /**
- * Exact examples embedded in plan-mode instructions. Tests parse these with
- * the same shared schemas used at runtime, preventing prompt/schema drift.
+ * Inline file templates for plan-mode instructions, INTERPOLATED with the real
+ * slug/title/schedule (QA gate 1 F1): gpt-5.6-sol parrots template values that
+ * sit semantically near its own subject, so exemplar values must BE the correct
+ * values — a parroted template then produces files that pass reconciliation.
+ * Concept/topic slugs stay obviously-placeholder so the model replaces them.
+ * Tests build these with the same inputs and parse them with the runtime schemas.
  */
-export const PLAN_FILE_TEMPLATES = {
-  profileFrontmatter: ONBOARDING_FILE_TEMPLATES.profileFrontmatter,
-  track: `track: sql-interview
-display_name: SQL Interview Prep
-target_date: 2026-09-01
-items:
-  - concept: select-basics
-    topic: sql
-    weight: 1.0
-  - concept: joins
-    topic: sql
-    weight: 1.5`,
-  roadmap: `track: sql-interview
-created: 2026-07-19
-schedule:
-  study_days: [mon, wed, fri]
-  minutes_per_day: 45
-  start_date: 2026-07-19
-days:
-  - day: 1
-    title: SELECT fundamentals
-    status: upcoming
-    topics:
-      - topic: sql
-        concepts: [select-basics]
-    subtopics:
-      - SELECT / FROM / WHERE anatomy
-      - Sorting and limiting result sets
-  - day: 2
-    title: Filtering and NULLs
-    status: upcoming
-    topics:
-      - topic: sql
-        concepts: [select-basics]
-    subtopics: [Predicate order, Three-valued logic]
-  - day: 3
-    title: JOIN foundations
-    status: upcoming
-    topics:
-      - topic: sql
-        concepts: [joins]
-    subtopics: [Join keys, INNER JOIN result shapes]
-  - day: 4
-    title: Outer joins
-    status: upcoming
-    topics:
-      - topic: sql
-        concepts: [joins]
-    subtopics: [LEFT JOIN preservation, NULL edge cases]
-  - day: 5
-    title: Integration practice
-    status: upcoming
-    topics:
-      - topic: sql
-        concepts: [select-basics, joins]
-    subtopics: [Mixed query drill, Interview explanation practice]`,
-  briefFrontmatter: `track: sql-interview
-goal_type: interview
-target_date: 2026-09-01
-source: job-description`,
-} as const;
+export function buildPlanFileTemplates(opts: {
+  trackSlug: string;
+  intake: TrackIntake;
+  today: string;
+}): { track: string; roadmap: string; briefFrontmatter: string } {
+  const { trackSlug, intake, today } = opts;
+  // YAML-safe double-quoted scalar for the free-text subject.
+  const displayName = JSON.stringify(intake.subject);
+  const targetDateLine = intake.targetDate ? [`target_date: ${intake.targetDate}`] : [];
+  const source = intake.sourceText?.trim()
+    ? intake.sourceKind === 'job-description'
+      ? 'job-description'
+      : 'syllabus'
+    : intake.subtopics?.trim()
+      ? 'self-described'
+      : 'none';
+  return {
+    track: [
+      `track: ${trackSlug}`,
+      `display_name: ${displayName}`,
+      ...targetDateLine,
+      'items:',
+      '  - concept: first-core-concept',
+      '    topic: main-topic-slug',
+      '    weight: 1.0',
+      '  - concept: second-core-concept',
+      '    topic: main-topic-slug',
+      '    weight: 1.5',
+    ].join('\n'),
+    roadmap: [
+      `track: ${trackSlug}`,
+      `created: ${today}`,
+      'schedule:',
+      `  study_days: [${intake.studyDays.join(', ')}]`,
+      `  minutes_per_day: ${intake.minutesPerDay}`,
+      `  start_date: ${today}`,
+      'days:',
+      '  - day: 1',
+      '    title: Foundations',
+      '    status: upcoming',
+      '    topics:',
+      '      - topic: main-topic-slug',
+      '        concepts: [first-core-concept]',
+      '    subtopics:',
+      '      - First fundamentals sub-skill',
+      '      - Second fundamentals sub-skill',
+      '  - day: 2',
+      '    title: Building blocks',
+      '    status: upcoming',
+      '    topics:',
+      '      - topic: main-topic-slug',
+      '        concepts: [first-core-concept, second-core-concept]',
+      '    subtopics: [Applied practice, Common pitfalls]',
+      '  - day: 3',
+      '    title: Integration practice',
+      '    status: upcoming',
+      '    topics:',
+      '      - topic: main-topic-slug',
+      '        concepts: [second-core-concept]',
+      '    subtopics: [Mixed drill, Explaining your reasoning]',
+      '  - day: 4',
+      '    title: Deepening',
+      '    status: upcoming',
+      '    topics:',
+      '      - topic: main-topic-slug',
+      '        concepts: [second-core-concept]',
+      '    subtopics: [Edge cases, Speed and fluency]',
+      '  - day: 5',
+      '    title: Consolidation',
+      '    status: upcoming',
+      '    topics:',
+      '      - topic: main-topic-slug',
+      '        concepts: [first-core-concept, second-core-concept]',
+      '    subtopics: [Full-scope practice, Self-explanation]',
+    ].join('\n'),
+    briefFrontmatter: [
+      `track: ${trackSlug}`,
+      `goal_type: ${intake.goalType}`,
+      ...targetDateLine,
+      `source: ${source}`,
+    ].join('\n'),
+  };
+}
 
 const styleForProfile = (style: TrackIntake['style']): 'socratic' | 'direct' | undefined => {
   if (style === 'explain-first') return 'direct';
@@ -84,6 +112,12 @@ const styleForProfile = (style: TrackIntake['style']): 'socratic' | 'direct' | u
 
 /** Thread-start instructions for one roadmap-generation sitting. */
 export function buildPlanInstructions(opts: PlanModeOptions): string {
+  const today = opts.today ?? new Date().toISOString().slice(0, 10);
+  const templates = buildPlanFileTemplates({
+    trackSlug: opts.trackSlug,
+    intake: opts.intake,
+    today,
+  });
   const intake = {
     subject: opts.intake.subject,
     goalType: opts.intake.goalType,
@@ -119,12 +153,13 @@ export function buildPlanInstructions(opts: PlanModeOptions): string {
           `   and map teaching style to preferences.style${profileStyle ? `: ${profileStyle}` : ' when known'}.`,
           '   Exact frontmatter shape:',
           '---',
-          PLAN_FILE_TEMPLATES.profileFrontmatter,
+          ONBOARDING_FILE_TEMPLATES.profileFrontmatter,
           '---',
         ]
       : ['2. Read profile.md; preserve its keys and add this slug to its tracks list.']),
     `3. Write tracks/${opts.trackSlug}/track.yaml with 8–20 weighted concepts,`,
-    '   using kebab-case topic/concept slugs and reusing an existing topic slug when appropriate.',
+    '   replacing the placeholder concept/topic slugs below with real kebab-case',
+    '   slugs for THIS subject (reuse an existing topic slug when it matches).',
     `4. Write tracks/${opts.trackSlug}/roadmap.yaml with 5–60 contiguous days: use`,
     '   totalDays, or compute days from targetDate and studyDays. Every day has 2–5',
     '   subtopics, concepts drawn from track.yaml, prerequisite order, and status upcoming.',
@@ -137,15 +172,19 @@ export function buildPlanInstructions(opts: PlanModeOptions): string {
     '   with bullets for goal, source, day count, and Day 1 title. Never end uncommitted.',
     '7. Finish with 2–3 warm learner-facing lines: what the plan covers and Day 1.',
     '',
+    'CRITICAL: the `track:` field in track.yaml, roadmap.yaml, and brief.md MUST be',
+    `exactly \`${opts.trackSlug}\` — identical to the directory name. Any other value`,
+    'fails server validation and the roadmap will not go live.',
+    '',
     `Exact tracks/${opts.trackSlug}/track.yaml shape (expand items):`,
-    PLAN_FILE_TEMPLATES.track,
+    templates.track,
     '',
     `Exact tracks/${opts.trackSlug}/roadmap.yaml shape (expand to N days):`,
-    PLAN_FILE_TEMPLATES.roadmap,
+    templates.roadmap,
     '',
     `Exact tracks/${opts.trackSlug}/brief.md frontmatter shape:`,
     '---',
-    PLAN_FILE_TEMPLATES.briefFrontmatter,
+    templates.briefFrontmatter,
     '---',
     '',
     `session_token for all ui_* tool calls: ${opts.sessionToken}`,

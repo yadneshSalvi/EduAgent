@@ -25,6 +25,7 @@ export { ReviewService, NothingDueError, type ReviewServiceDeps } from './Review
 export { dueSummary, nextDueProjection, type DueSummary } from './SrsEngine.js';
 export {
   slugify,
+  buildPlanRetryKickoff,
   TrackDayError,
   TrackNotFoundError,
   TrackService,

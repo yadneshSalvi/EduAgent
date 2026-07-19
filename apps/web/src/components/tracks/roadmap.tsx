@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { notFound, useRouter } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
 import { Check, ChevronDown, Loader2, Play, RotateCcw } from 'lucide-react';
 import type { TrackDetail } from '@eduagent/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTrackDetail, useTrackSessions } from '@/hooks/use-tracks';
 import { createTrackSession, retryTrackGeneration } from '@/lib/api';
-import { formatRoadmapDate, roadmapDayState, type RoadmapDay } from '@/lib/tracks';
+import { formatRoadmapDate, isTrackNotFound, roadmapDayState, type RoadmapDay } from '@/lib/tracks';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ErrorState } from '@/components/shared/error-state';
@@ -244,7 +244,7 @@ function DayCard({
           state === 'complete' && 'bg-surface/60 text-muted-foreground',
           state === 'in-progress' && 'border-l-4 border-l-primary',
           state === 'current' && 'border-primary/50',
-          state === 'locked' && 'opacity-[0.55]',
+          state === 'locked' && 'opacity-55',
         )}
       >
         <button
@@ -405,6 +405,7 @@ export function Roadmap({ slug, born = false }: { slug: string; born?: boolean }
   if (detail.isPending) {
     return <div className="m-8 h-96 animate-pulse rounded-lg border bg-surface" aria-hidden />;
   }
+  if (isTrackNotFound(detail.error)) notFound();
   if (detail.isError) {
     return (
       <div className="flex flex-1 items-center justify-center p-8">

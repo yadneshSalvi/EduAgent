@@ -1,4 +1,14 @@
 import type { TrackDetail } from '@eduagent/shared';
+import { ApiError } from '@/lib/api';
+
+/**
+ * True when a track query failed because the track does not exist (QA F3):
+ * the track surfaces map this onto Next's notFound() instead of rendering a
+ * phantom shell around the slug.
+ */
+export function isTrackNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
 
 export type RoadmapDay = NonNullable<TrackDetail['roadmap']>['days'][number];
 export type RoadmapDayState = 'complete' | 'in-progress' | 'current' | 'upcoming' | 'locked';

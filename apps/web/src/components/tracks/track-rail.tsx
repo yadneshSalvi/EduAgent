@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { notFound, usePathname } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
 import { load as yamlLoad } from 'js-yaml';
 import { ArrowLeft, BookOpen, FileText, Menu, X } from 'lucide-react';
@@ -10,7 +10,7 @@ import type { TrackSessions } from '@eduagent/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useTrackDetail, useTrackSessions } from '@/hooks/use-tracks';
 import { getMemoryFile } from '@/lib/api';
-import { formatRoadmapDate } from '@/lib/tracks';
+import { formatRoadmapDate, isTrackNotFound } from '@/lib/tracks';
 import { splitFrontmatter } from '@/components/memory/file-viewer';
 import { Markdown } from '@/components/chat/markdown';
 import { Badge } from '@/components/ui/badge';
@@ -123,6 +123,9 @@ function RailContent({
   const pathname = usePathname();
   const detail = useTrackDetail(slug);
   const sessions = useTrackSessions(slug);
+  // Unknown slug (QA F3): the rail lives in the track LAYOUT, so this guard
+  // covers every child route — no phantom shell around a nonexistent track.
+  if (isTrackNotFound(detail.error) || isTrackNotFound(sessions.error)) notFound();
   const activeThreadId = /\/s\/([^/]+)$/.exec(pathname)?.[1] ?? null;
   const homeActive = pathname === `/app/tracks/${slug}`;
   const titleByDay = useMemo(

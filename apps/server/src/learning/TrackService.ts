@@ -8,6 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Prisma, PrismaClient, Thread, Track } from '@prisma/client';
 import { dump as yamlDump } from 'js-yaml';
+import { z } from 'zod';
 import {
   localDate,
   roadmapFileSchema,
@@ -35,6 +36,24 @@ import {
 const GENERATING_STALE_MS = 15 * 60_000;
 const PLAN_KICKOFF_INPUT = '[plan-roadmap]';
 const ACCENTS = ['violet', 'cyan', 'amber', 'rose', 'emerald', 'blue'] as const;
+
+/**
+ * Retry kickoff for a failed generation (QA gate 1 F1b): without the concrete
+ * validation error the agent re-runs the same protocol against files already
+ * sitting broken at HEAD — a deterministic failure loop. The error text plus
+ * repair framing turns the retry into a targeted fix.
+ */
+export function buildPlanRetryKickoff(slug: string, reason: string): string {
+  return [
+    '[plan-roadmap-retry]',
+    `Your previous roadmap draft failed server validation and did NOT go live. Error: ${reason}`,
+    `Files may already exist under tracks/${slug}/ — READ them first, repair the listed`,
+    `problems in place (the track: field MUST be exactly "${slug}", identical to the`,
+    'directory name), keep everything that is already right, and commit the corrections',
+    `as: plan(${slug}): repair roadmap — <what you fixed>. Never end the turn uncommitted.`,
+    'Then tell the learner, in one warm line, that the plan is ready.',
+  ].join('\n');
+}
 
 const noopLogger: WorkspaceLogger = { info: () => {}, warn: () => {} };
 
@@ -92,6 +111,8 @@ export class TrackService {
   private readonly sink: ThreadEventSink;
   private readonly logger: WorkspaceLogger;
   private readonly now: () => Date;
+  /** Last reconciliation failure per user+slug — feeds the retry kickoff (F1b). */
+  private readonly failureReasons = new Map<string, string>();
 
   constructor(deps: TrackServiceDeps) {
     this.prisma = deps.prisma;
@@ -175,7 +196,8 @@ export class TrackService {
           trackSlug: slug,
           intake: trackIntakeSchema.parse(track.intake),
         }));
-      this.kickoff(track, thread);
+      const reason = this.failureReasons.get(this.failureKey(userId, slug));
+      this.kickoff(track, thread, reason ? buildPlanRetryKickoff(slug, reason) : undefined);
       return { ok: true, planThreadId: thread.id };
     } catch (err) {
       await this.failGeneration(userId, slug);
@@ -183,13 +205,17 @@ export class TrackService {
     }
   }
 
-  private kickoff(track: Track, thread: Thread): void {
+  private kickoff(track: Track, thread: Thread, input: string = PLAN_KICKOFF_INPUT): void {
     void this.threads
-      .startSystemTurn(thread, PLAN_KICKOFF_INPUT, { caption: 'Drafting your roadmap…' })
+      .startSystemTurn(thread, input, { caption: 'Drafting your roadmap…' })
       .then(
         () => this.reconcileGeneration(track.userId, track.slug),
         async (err: unknown) => {
           this.logger.warn({ err, track: track.slug }, 'roadmap generation turn failed');
+          this.failureReasons.set(
+            this.failureKey(track.userId, track.slug),
+            'the generation turn errored before finishing — the plan files may be absent or partial',
+          );
           await this.failGeneration(track.userId, track.slug);
         },
       );
@@ -205,11 +231,34 @@ export class TrackService {
         git.fileAtRef('HEAD', `tracks/${slug}/roadmap.yaml`),
         git.fileAtRef('HEAD', `tracks/${slug}/track.yaml`),
       ]);
-      if (roadmapRaw === null || trackRaw === null) throw new Error('plan artifacts are missing');
-      const roadmap = parseYamlFile(roadmapFileSchema, roadmapRaw);
-      const curriculum = parseYamlFile(trackFileSchema, trackRaw);
+      if (roadmapRaw === null || trackRaw === null) {
+        throw new Error(
+          `tracks/${slug}/roadmap.yaml and tracks/${slug}/track.yaml must both be committed; ` +
+            `${roadmapRaw === null ? 'roadmap.yaml' : 'track.yaml'} is missing at HEAD`,
+        );
+      }
+      let roadmap = parseArtifact(roadmapFileSchema, roadmapRaw, `tracks/${slug}/roadmap.yaml`);
+      let curriculum = parseArtifact(trackFileSchema, trackRaw, `tracks/${slug}/track.yaml`);
       if (roadmap.track !== slug || curriculum.track !== slug) {
-        throw new Error('plan artifact track slug does not match its directory');
+        // Otherwise-valid files with a parroted `track:` value (QA gate 1 F1):
+        // deterministic server-side repair beats failing the whole generation.
+        const repaired = await this.normalizeTrackField(userId, slug, {
+          roadmap: roadmap.track === slug ? null : roadmapRaw,
+          curriculum: curriculum.track === slug ? null : trackRaw,
+        });
+        roadmap = parseArtifact(
+          roadmapFileSchema,
+          repaired.roadmap ?? roadmapRaw,
+          `tracks/${slug}/roadmap.yaml`,
+        );
+        curriculum = parseArtifact(
+          trackFileSchema,
+          repaired.curriculum ?? trackRaw,
+          `tracks/${slug}/track.yaml`,
+        );
+        if (roadmap.track !== slug || curriculum.track !== slug) {
+          throw new Error(`the track: field could not be normalized to "${slug}"`);
+        }
       }
       const curriculumConcepts = new Set(curriculum.items.map((item) => item.concept));
       const unknownConcepts = unique(
@@ -229,11 +278,58 @@ export class TrackService {
         where: { id: track.id },
         data: { status: 'active', title: curriculum.display_name, lastActiveAt: this.now() },
       });
+      this.failureReasons.delete(this.failureKey(userId, slug));
       this.emitUpdated(updated);
     } catch (err) {
       this.logger.warn({ err, userId, slug }, 'roadmap reconciliation failed');
+      this.failureReasons.set(
+        this.failureKey(userId, slug),
+        err instanceof Error ? err.message : String(err),
+      );
       await this.failGeneration(userId, slug);
     }
+  }
+
+  /**
+   * Rewrites the `track:` line of the given raw files to the directory slug
+   * and commits the repair — serialized with turns like every server-side
+   * workspace write. Returns the repaired raw contents.
+   */
+  private async normalizeTrackField(
+    userId: string,
+    slug: string,
+    raws: { roadmap: string | null; curriculum: string | null },
+  ): Promise<{ roadmap: string | null; curriculum: string | null }> {
+    const fix = (raw: string): string => raw.replace(/^track:.*$/m, `track: ${slug}`);
+    const repaired = {
+      roadmap: raws.roadmap === null ? null : fix(raws.roadmap),
+      curriculum: raws.curriculum === null ? null : fix(raws.curriculum),
+    };
+    await this.threads.runExclusive(userId, async () => {
+      const git = this.workspaces.git(userId);
+      const sinceSha = await git.headSha();
+      const dir = this.workspaces.pathFor(userId);
+      if (repaired.roadmap !== null) {
+        await fs.writeFile(path.join(dir, `tracks/${slug}/roadmap.yaml`), repaired.roadmap, 'utf8');
+      }
+      if (repaired.curriculum !== null) {
+        await fs.writeFile(
+          path.join(dir, `tracks/${slug}/track.yaml`),
+          repaired.curriculum,
+          'utf8',
+        );
+      }
+      await git.commitAll(
+        `plan(${slug}): normalize track slug\n\n- Rewrote the track: field to match the directory name`,
+      );
+      await this.memory.emitCommits(userId, sinceSha);
+    });
+    this.logger.warn({ userId, slug }, 'normalized parroted track slug in plan artifacts');
+    return repaired;
+  }
+
+  private failureKey(userId: string, slug: string): string {
+    return `${userId} ${slug}`;
   }
 
   /** One boot-time recovery pass for generation turns abandoned by a restart. */
@@ -591,6 +687,26 @@ export class TrackService {
       }
     }
     return result;
+  }
+}
+
+/**
+ * parseYamlFile with an agent-actionable error: names the file and summarizes
+ * the zod issues — this text reaches the retry kickoff (buildPlanRetryKickoff),
+ * so it must read as repair instructions, not a JSON blob.
+ */
+function parseArtifact<S extends z.ZodType>(schema: S, raw: string, file: string): z.infer<S> {
+  try {
+    return parseYamlFile(schema, raw);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const issues = err.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join('.') || 'root'}: ${issue.message}`)
+        .join('; ');
+      throw new Error(`${file} is invalid — ${issues}`);
+    }
+    throw new Error(`${file} could not be parsed as YAML`);
   }
 }
 
