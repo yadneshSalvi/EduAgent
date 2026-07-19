@@ -126,6 +126,14 @@ reseed Alex immediately with `ENV_FILE=.env.production ./deploy/cron/reset-alex.
 generates the new directory layout natively; there is no runtime migration for an older demo
 workspace. This preserves Alex's linked User row and does not change the nightly reset schedule.
 
+**FULL-seed Clerk-link trap (bit us 2026-07-20):** running the FULL seeder
+(`tsx src/seed/index.ts` with no `--user`) recreates the alex row WITHOUT `authId`. If anyone
+then visits with a still-valid Clerk session, the server auto-provisions a ghost User row that
+claims the minted Clerk id, and demo-login starts failing `clerk_unavailable` (duplicate-user
+mint). Fix: null the ghost row's `authId`, re-set alex's `authId` to the recorded production
+Clerk id (`user_3GiwB47F8RqFgcGAIFxhLDYMJ8K`), retest `POST /auth/demo-login`. Prefer
+`reset-alex.sh` (preserves the link) for routine reseeds.
+
 ## 7. Sandbox decision tree (plans/08 §4) — RUN THIS BEFORE ANNOUNCING THE URL
 
 > **RESOLVED 2026-07-19 (production, eduagent.aiquantized.com): branch 2 EXTENDED wins.**
