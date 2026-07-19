@@ -440,6 +440,7 @@ function applyEvent(state: TurnStreamState, event: WsEvent): TurnStreamState {
 
     // Workbench / grading / assessment events were folded in by
     // applyWorkbenchEvent above; exam events are Phase 3/4 surfaces.
+    // track.updated is handled at component level via useUserSocketEvents.
     case 'workbench.exercise':
     case 'workbench.quiz':
     case 'workbench.artifact':
@@ -448,7 +449,6 @@ function applyEvent(state: TurnStreamState, event: WsEvent): TurnStreamState {
     case 'quiz.graded':
     case 'exam.created':
     case 'exam.graded':
-    // Track events get their real handlers in the tracks frontend slice.
     case 'track.updated':
       return state;
   }
