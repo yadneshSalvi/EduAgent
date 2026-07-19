@@ -19,6 +19,13 @@ export interface LearnModeOptions {
    * underway if the mode context must change (plans/03 §3.1).
    */
   isSessionStart?: boolean;
+  trackSlug?: string;
+  roadmapDay?: number;
+  dayTitle?: string;
+  daySubtopics?: readonly string[];
+  intent?: 'teach' | 'revise' | 'mistakes';
+  /** Server-composed, bounded evidence for a mistakes session. */
+  mistakesEvidence?: string;
 }
 
 export function buildLearnInstructions(opts: LearnModeOptions): string {
@@ -45,6 +52,36 @@ export function buildLearnInstructions(opts: LearnModeOptions): string {
     'the current learner state digest — trust it over your own recollection; it',
     'reflects the files on disk.',
   ];
+  if (
+    opts.trackSlug !== undefined &&
+    opts.roadmapDay !== undefined &&
+    opts.dayTitle !== undefined
+  ) {
+    lines.push(
+      '',
+      'Track-roadmap session:',
+      `- This session serves Day ${opts.roadmapDay} ("${opts.dayTitle}") of the learner's ` +
+        `${opts.trackSlug} roadmap. Planned subtopics: ${(opts.daySubtopics ?? []).join('; ')}.`,
+      `- Read tracks/${opts.trackSlug}/brief.md for the goal; stay on this day's scope unless ` +
+        'the learner pulls elsewhere.',
+      `- The session log frontmatter MUST include track: ${opts.trackSlug}, ` +
+        `roadmap_day: ${opts.roadmapDay}, and a short title: value.`,
+      '- After recap, session log, and commit, call ui_session_wrap with this day, a two-line',
+      '  summary, and concept deltas. Call it immediately when the learner asks to wrap up.',
+      '- Never mark a roadmap day complete; only the learner can choose that action.',
+    );
+    if (opts.intent === 'revise') {
+      lines.push(
+        `- This is a REVISION of Day ${opts.roadmapDay}: retrieval practice first, then re-teach ` +
+          'what wobbles. Do not mark anything complete.',
+      );
+    } else if (opts.intent === 'mistakes') {
+      lines.push(
+        "- Rebuild from this learner's actual mistakes. Open by citing 1–2 concretely, then drill.",
+        `  Evidence: ${opts.mistakesEvidence ?? 'No recorded mistake evidence; begin with retrieval.'}`,
+      );
+    }
+  }
   if (opts.isSessionStart ?? true) {
     lines.push(
       '',

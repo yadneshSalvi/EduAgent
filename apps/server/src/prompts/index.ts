@@ -17,6 +17,7 @@ export {
 } from './modes/exam-grade.js';
 export { buildLearnInstructions, type LearnModeOptions } from './modes/learn.js';
 export { buildOnboardingInstructions, type OnboardingModeOptions } from './modes/onboarding.js';
+export { buildPlanInstructions, PLAN_FILE_TEMPLATES, type PlanModeOptions } from './modes/plan.js';
 export {
   buildReviewInstructions,
   formatReviewDueNotes,
@@ -39,5 +40,6 @@ export {
   EXAM_INSTRUCTIONS_TOKEN_BUDGET,
   MODE_INSTRUCTIONS_TOKEN_BUDGET,
   ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET,
+  PLAN_INSTRUCTIONS_TOKEN_BUDGET,
   STATE_DIGEST_TOKEN_BUDGET,
 } from './tokens.js';

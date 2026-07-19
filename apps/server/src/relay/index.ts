@@ -23,6 +23,7 @@ import {
   isUiToolName,
   quizPayloadSchema,
   relayToolCallRequestSchema,
+  sessionWrapPayloadSchema,
   uiToolArgSchemas,
   UI_TOOL_NAMES,
   type ExamResult,
@@ -257,6 +258,8 @@ export class UiToolRelay {
         return this.createExam(args as UiToolArgs['ui_create_exam'], thread);
       case 'ui_grade_exam':
         return this.gradeExam(args as UiToolArgs['ui_grade_exam'], thread);
+      case 'ui_session_wrap':
+        return this.sessionWrap(args as UiToolArgs['ui_session_wrap'], thread);
       default:
         // isUiToolName narrowed `tool` to the dispatch table; unreachable.
         return Promise.resolve(fail(400, `${tool} is not dispatchable.`));
@@ -264,6 +267,44 @@ export class UiToolRelay {
   }
 
   // ------------------------------------------------------------------- tools
+
+  private async sessionWrap(
+    args: UiToolArgs['ui_session_wrap'],
+    thread: Thread,
+  ): Promise<RelayResult> {
+    if (thread.trackSlug === null || thread.roadmapDay === null) {
+      return fail(
+        400,
+        'ui_session_wrap is only for a learning-track session. This thread has no trackSlug ' +
+          'and roadmapDay; finish this legacy/review/exam session in chat without calling it.',
+      );
+    }
+    if (args.day !== thread.roadmapDay) {
+      return fail(
+        400,
+        `ui_session_wrap day must be this thread's roadmap day (${thread.roadmapDay}), not ` +
+          `${args.day}. Fix day and call again.`,
+      );
+    }
+    const payload = sessionWrapPayloadSchema.parse(args);
+    await this.prisma.itemMirror.create({
+      data: {
+        threadId: thread.id,
+        role: 'agent',
+        kind: 'wrap',
+        payload: payload as Prisma.InputJsonValue,
+      },
+    });
+    this.sink.emitToThread(thread.id, {
+      type: 'session.wrap',
+      threadId: thread.id,
+      wrap: payload,
+    });
+    return ok(
+      `Session wrap is visible for Day ${args.day}. The learner now chooses complete, revise, ` +
+        'or learn from mistakes; do not choose or mark completion for them.',
+    );
+  }
 
   private async pushExercise(
     args: UiToolArgs['ui_push_exercise'],
@@ -680,7 +721,7 @@ export class UiToolRelay {
       `Question${offenders.length === 1 ? '' : 's'} ${offenders.join(', ')} reference concepts ` +
         `outside the ${trackSlug} curriculum. Every question's concepts must come from the ` +
         "track's items (use the exact concept ids from tracks/" +
-        `${trackSlug}.yaml, optionally topic-qualified). Fix them and call again.`,
+        `${trackSlug}/track.yaml, optionally topic-qualified). Fix them and call again.`,
     );
   }
 

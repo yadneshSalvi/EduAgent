@@ -19,7 +19,11 @@ workspace/
 ├── README.md                   # human intro (do not rewrite)
 ├── profile.md                  # who the learner is (goals, background, preferences)
 ├── tracks/
-│   └── sql-interview.yaml      # goal-oriented curriculum: ordered concepts + weights
+│   └── sql-interview/
+│       ├── track.yaml          # ordered concepts + readiness weights
+│       ├── roadmap.yaml        # server-completed day-by-day plan
+│       ├── brief.md            # distilled goal and constraints
+│       └── sources/            # learner-provided requirements
 ├── topics/
 │   └── sql/
 │       ├── mastery.yaml        # concept nodes — THE core file
@@ -135,7 +139,7 @@ New misconception → add an `## [OPEN] …` entry (first_seen, concepts,
 evidence, remediation plan). Resolved → change the header to
 `## [RESOLVED <date>]` and keep the entry; resolution history is valuable.
 
-### tracks/\<track\>.yaml
+### tracks/\<track\>/track.yaml
 
 ```yaml
 track: sql-interview
@@ -150,10 +154,23 @@ items: # ordered curriculum; weight = importance for readiness
     weight: 1.5
 ```
 
-`track` matches the filename; every item is `concept`/`topic`/`weight` (a
+`track` matches the directory name; every item is `concept`/`topic`/`weight` (a
 positive number). Use ONE short kebab-case topic slug per subject (e.g.
 `sql`), shared by all of its concepts. Omit `target_date` when there is no
 deadline.
+
+### tracks/\<track\>/roadmap.yaml
+
+The roadmap contains `track`, `created`, `schedule` (`study_days`,
+`minutes_per_day`, `start_date`), and 5–60 contiguous `days`. Each day has
+`day`, `title`, `status`, `topics` (`topic` + `concepts`), and 2–5
+human-readable `subtopics`. Status is ONLY `complete` or `upcoming`;
+`completed_on` is required only for complete days. Planned dates and the
+current HEAD day are derived by the server and are never stored.
+
+**You never mark days complete.** Completion is a learner action owned by
+the server. You may create or replan roadmap content, but never flip a day's
+status or write `completed_on` during a tutoring or planning turn.
 
 ### srs/queue.yaml
 
@@ -180,8 +197,9 @@ queued concept:**
 
 ### sessions/\<date\>-\<slug\>.md — write at every session end
 
-Frontmatter: `date`, `mode` (onboarding|learn|review|exam), `topics`,
-`duration_estimate`, `concepts_touched`, `next_time`. Body: ~10-line
+Frontmatter: `date`, `mode` (onboarding|learn|review|exam|plan), `topics`,
+`duration_estimate`, `concepts_touched`, `next_time`. Track sessions also
+require `track`, `roadmap_day`, and a short `title`. Body: ~10-line
 narrative — what was covered, how the learner did, what surprised you.
 
 ```markdown
@@ -211,7 +229,7 @@ a concrete, startable pointer, not "more SQL".
 - Next: <pointer>
 ```
 
-- `type ∈ {learn, review, exam, misconception, profile, seed, system}`. The
+- `type ∈ {learn, review, exam, misconception, profile, seed, system, plan}`. The
   `(<topic>)` segment is a kebab-case topic slug; omit it only for
   workspace-wide commits (e.g. `profile: …`).
 - Mastery deltas belong in the **headline**, exact form `concept-id 0.40→0.72`

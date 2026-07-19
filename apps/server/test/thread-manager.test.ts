@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import type { PrismaClient, Thread } from '@prisma/client';
 import type { WsEvent } from '@eduagent/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -39,7 +40,9 @@ function recordingSink() {
         const hit = records.find(predicate);
         if (hit) return hit;
         if (Date.now() > deadline) {
-          throw new Error(`sink.until timed out; saw: ${records.map((r) => r.event.type).join(',')}`);
+          throw new Error(
+            `sink.until timed out; saw: ${records.map((r) => r.event.type).join(',')}`,
+          );
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
@@ -123,7 +126,9 @@ beforeEach(async () => {
       child.respond(msg.id as number, { thread: { id: `cdx-${counters.thread}` } });
     });
     child.onMethod('thread/resume', (msg) => {
-      child.respond(msg.id as number, { thread: { id: (msg.params as { threadId: string }).threadId } });
+      child.respond(msg.id as number, {
+        thread: { id: (msg.params as { threadId: string }).threadId },
+      });
     });
   });
   spawns = spawner.spawns;
@@ -208,6 +213,27 @@ describe('ensureThread', () => {
     expect(fake.received.filter((m) => m.method === 'thread/start').length).toBe(before);
   });
 
+  it('legacy ensureThread never captures a track session sharing the topic', async () => {
+    scriptCannedTurns(fake, counters);
+    const trackSession = await prisma.thread.create({
+      data: {
+        userId: USER_ID,
+        codexThreadId: 'cdx-track-sql',
+        mode: 'learn',
+        topicSlug: 'sql',
+        trackSlug: 'sql-interview',
+        roadmapDay: 3,
+        intent: 'teach',
+        title: 'Day 3 — joins',
+        sessionToken: 'tok-track-sql',
+      },
+    });
+    const ensured = await manager.ensureThread(USER_ID, 'learn', { topicSlug: 'sql' });
+    expect(ensured.created).toBe(true);
+    expect(ensured.thread.id).not.toBe(trackSession.id);
+    expect(ensured.thread.roadmapDay).toBeNull();
+  });
+
   it('rejects exam mode (forked by ExamService, never created directly)', async () => {
     await expect(manager.ensureThread(USER_ID, 'exam')).rejects.toThrow(/not creatable/);
   });
@@ -233,6 +259,104 @@ describe('ensureThread', () => {
     const input = (turnStart.params as { input: Array<{ text: string }> }).input[0]!.text;
     expect(input).toContain('REVIEW DUE');
     expect(input).toContain('nothing is due');
+  });
+
+  it('always creates new track sessions and composes teach/revise/real-mistakes instructions', async () => {
+    scriptCannedTurns(fake, counters);
+    await workspaces.ensureWorkspace(USER_ID);
+    const write = async (rel: string, content: string) => {
+      const absolute = path.join(workspaces.pathFor(USER_ID), rel);
+      await fs.mkdir(path.dirname(absolute), { recursive: true });
+      await fs.writeFile(absolute, content, 'utf8');
+    };
+    await write(
+      'tracks/sql-interview/track.yaml',
+      'track: sql-interview\ndisplay_name: SQL\nitems:\n  - concept: joins\n    topic: sql\n    weight: 1\n',
+    );
+    await write(
+      'tracks/sql-interview/roadmap.yaml',
+      [
+        'track: sql-interview',
+        'created: 2026-07-19',
+        'schedule:',
+        '  study_days: [mon, wed, fri]',
+        '  minutes_per_day: 45',
+        '  start_date: 2026-07-19',
+        'days:',
+        ...Array.from({ length: 5 }, (_, index) =>
+          [
+            `  - day: ${index + 1}`,
+            `    title: Topic ${index + 1}`,
+            '    status: upcoming',
+            '    topics:',
+            '      - topic: sql',
+            '        concepts: [joins]',
+            '    subtopics: [Join keys, Result shapes]',
+          ].join('\n'),
+        ),
+      ].join('\n') + '\n',
+    );
+    await write(
+      'topics/sql/misconceptions.md',
+      '## [OPEN] JOIN key confusion\n\n- concepts: [joins]\n- Evidence: matched on the wrong key.\n',
+    );
+    await write(
+      'sessions/2026-07-18-joins.md',
+      '---\ndate: 2026-07-18\nmode: learn\ntrack: sql-interview\nroadmap_day: 1\ntitle: Joins\ntopics: [sql]\nduration_estimate: 20m\nconcepts_touched: [joins]\nnext_time: Re-test the wrong-key case\n---\n',
+    );
+    await workspaces.git(USER_ID).commitAll('plan(sql-interview): create roadmap — 5 days');
+    const exercise = await prisma.exercise.create({
+      data: {
+        userId: USER_ID,
+        threadId: 'historical',
+        slug: 'ex-joins',
+        language: 'sql',
+        title: 'Join the orders',
+        prompt: 'Join orders and users.',
+        starterCode: '',
+        concepts: ['joins'],
+        difficulty: 'medium',
+        status: 'failed',
+      },
+    });
+    await prisma.exerciseAttempt.create({
+      data: {
+        exerciseId: exercise.id,
+        code: 'SELECT 1',
+        verdict: 'failed',
+        feedback: 'Used customer_id instead of user_id.',
+      },
+    });
+
+    const teach = await manager.createTrackSession(USER_ID, {
+      trackSlug: 'sql-interview',
+      day: 1,
+      intent: 'teach',
+    });
+    const revise = await manager.createTrackSession(USER_ID, {
+      trackSlug: 'sql-interview',
+      day: 1,
+      intent: 'revise',
+    });
+    const mistakes = await manager.createTrackSession(USER_ID, {
+      trackSlug: 'sql-interview',
+      day: 1,
+      intent: 'mistakes',
+    });
+    expect(new Set([teach.id, revise.id, mistakes.id]).size).toBe(3);
+    expect(teach).toMatchObject({ roadmapDay: 1, intent: 'teach', title: 'Day 1 — Topic 1' });
+    expect(revise.title).toBe('Day 1 — revisited');
+    expect(mistakes.title).toBe('Day 1 — fixing gaps');
+    const instructions = fake.received
+      .filter((message) => message.method === 'thread/start')
+      .map(
+        (message) => (message.params as { developerInstructions: string }).developerInstructions,
+      );
+    expect(instructions.at(-3)).toContain('ui_session_wrap');
+    expect(instructions.at(-2)).toContain('REVISION');
+    expect(instructions.at(-1)).toContain('Used customer_id instead of user_id');
+    expect(instructions.at(-1)).toContain('JOIN key confusion');
+    expect(instructions.at(-1)).toContain('Re-test the wrong-key case');
   });
 });
 

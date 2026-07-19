@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { memoryCommitSchema } from './memory-commit';
+import { trackStatusSchema } from './tracks';
 import {
   artifactPayloadSchema,
   assessmentPayloadSchema,
@@ -7,6 +8,7 @@ import {
   exerciseVerdictSchema,
   quizGradeResultSchema,
   quizPayloadSchema,
+  sessionWrapPayloadSchema,
 } from './mcp-tools';
 
 /**
@@ -44,6 +46,16 @@ export const wsEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('exam.created'), examId: z.string().min(1) }),
   z.object({ type: z.literal('exam.graded'), examId: z.string().min(1) }),
+  z.object({
+    type: z.literal('session.wrap'),
+    threadId: z.string().min(1),
+    wrap: sessionWrapPayloadSchema,
+  }),
+  z.object({
+    type: z.literal('track.updated'),
+    slug: z.string().min(1),
+    status: trackStatusSchema,
+  }),
   z.object({ type: z.literal('memory.commit'), commit: memoryCommitSchema }),
   z.object({ type: z.literal('turn.completed'), threadId: z.string().min(1) }),
   z.object({

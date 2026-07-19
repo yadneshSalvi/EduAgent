@@ -184,6 +184,16 @@ describe('GET /api/threads', () => {
       headers: { cookie },
     });
     expect(badMode.statusCode).toBe(400);
+
+    const own = await prisma.thread.findFirstOrThrow({ where: { userId, mode: 'learn' } });
+    await prisma.thread.update({ where: { id: own.id }, data: { trackSlug: 'sql-interview' } });
+    const byTrack = await app.inject({
+      method: 'GET',
+      url: '/api/threads?track=sql-interview',
+      headers: { cookie },
+    });
+    const filtered = listThreadsResponseSchema.parse(byTrack.json()).threads;
+    expect(filtered.map((thread) => thread.id)).toEqual([own.id]);
   });
 });
 

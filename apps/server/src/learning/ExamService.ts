@@ -126,6 +126,15 @@ export class ExamService {
 
     const parent =
       (await this.prisma.thread.findFirst({
+        where: {
+          userId,
+          mode: 'learn',
+          status: 'active',
+          trackSlug: opts.trackSlug,
+        },
+        orderBy: { lastActiveAt: 'desc' },
+      })) ??
+      (await this.prisma.thread.findFirst({
         where: { userId, mode: 'learn', status: 'active' },
         orderBy: { lastActiveAt: 'desc' },
       })) ?? (await this.threads.ensureThread(userId, 'learn')).thread;

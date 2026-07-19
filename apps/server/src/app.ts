@@ -18,11 +18,17 @@ import { memoryRoutes } from './api/memory.js';
 import { quizRoutes } from './api/quiz.js';
 import { reviewRoutes } from './api/review.js';
 import { threadRoutes } from './api/threads.js';
+import { trackRoutes } from './api/tracks.js';
 import { wsRoutes } from './api/ws.js';
 import { createAuthProvider, type AuthedUser, type DemoClerkClient } from './auth/index.js';
 import type { HealthProbe } from './codex/index.js';
 import type { AppConfig } from './config.js';
-import type { DashboardService, ExamService, ReviewService } from './learning/index.js';
+import type {
+  DashboardService,
+  ExamService,
+  ReviewService,
+  TrackService,
+} from './learning/index.js';
 import type { ThreadService } from './threads/index.js';
 import type { WorkspaceManager } from './workspace/index.js';
 
@@ -44,6 +50,7 @@ declare module 'fastify' {
     review?: ReviewService;
     /** Phase 4 services. */
     exams?: ExamService;
+    tracks?: TrackService;
   }
 }
 
@@ -57,6 +64,7 @@ export interface AppServiceSet {
   review?: ReviewService;
   /** When present, decorated for routes and sweep-stopped on app.close(). */
   exams?: ExamService;
+  tracks?: TrackService;
   /** When present, closed on app.close() (terminates the codex child). */
   client?: { close(): Promise<void> };
   /** When present, closed on app.close() (stops the UiToolRelay listener). */
@@ -121,6 +129,7 @@ export async function buildApp({
     if (resolved.dashboard) app.decorate('dashboard', resolved.dashboard);
     if (resolved.review) app.decorate('review', resolved.review);
     if (resolved.exams) app.decorate('exams', resolved.exams);
+    if (resolved.tracks) app.decorate('tracks', resolved.tracks);
     const client = resolved.client;
     const relay = resolved.relay;
     const exams = resolved.exams;
@@ -136,6 +145,7 @@ export async function buildApp({
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(threadRoutes);
+  await app.register(trackRoutes);
   await app.register(exerciseRoutes);
   await app.register(quizRoutes);
   await app.register(dashboardRoutes);

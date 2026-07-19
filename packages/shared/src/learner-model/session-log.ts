@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { conceptRefSchema, isoDateSchema, slugSchema } from '../common';
 
-/** Session modes: the three thread modes plus the first-ever `onboarding` sitting. */
-export const sessionModeSchema = z.enum(['onboarding', 'learn', 'review', 'exam']);
+/** Session modes: thread modes plus the first-ever `onboarding` sitting. */
+export const sessionModeSchema = z.enum(['onboarding', 'learn', 'review', 'exam', 'plan']);
 export type SessionMode = z.infer<typeof sessionModeSchema>;
 
 /**
@@ -18,5 +18,9 @@ export const sessionLogFrontmatterSchema = z.object({
   duration_estimate: z.union([z.string().min(1), z.number().positive()]),
   concepts_touched: z.array(conceptRefSchema).default([]),
   next_time: z.string().min(1).optional(),
+  /** Track-session grouping metadata; optional for all historical logs. */
+  track: slugSchema.optional(),
+  roadmap_day: z.number().int().positive().optional(),
+  title: z.string().min(1).optional(),
 });
 export type SessionLogFrontmatter = z.infer<typeof sessionLogFrontmatterSchema>;

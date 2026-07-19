@@ -60,7 +60,11 @@ export const threadRoutes: FastifyPluginAsync = async (app) => {
       return sendError(reply, 400, 'invalid_query', formatIssues(query.error.issues));
     }
     const threads = await app.prisma.thread.findMany({
-      where: { userId: authed.userId, ...(query.data.mode ? { mode: query.data.mode } : {}) },
+      where: {
+        userId: authed.userId,
+        ...(query.data.mode ? { mode: query.data.mode } : {}),
+        ...(query.data.track ? { trackSlug: query.data.track } : {}),
+      },
       orderBy: { lastActiveAt: 'desc' },
     });
     return { threads: threads.map(toThreadSummary) };
@@ -82,7 +86,9 @@ export const threadRoutes: FastifyPluginAsync = async (app) => {
         'unsupported_mode',
         body.data.mode === 'exam'
           ? 'Exam threads are forked via POST /api/exams (Phase 4).'
-          : 'Review sessions start via POST /api/review/start.',
+          : body.data.mode === 'plan'
+            ? 'Plan threads are created via POST /api/tracks.'
+            : 'Review sessions start via POST /api/review/start.',
       );
     }
     const { thread } = await threads.ensureThread(authed.userId, 'learn', {
@@ -128,6 +134,8 @@ function toThreadSummary(thread: Thread): ThreadSummary {
     mode: thread.mode as ThreadMode,
     topicSlug: thread.topicSlug,
     trackSlug: thread.trackSlug,
+    roadmapDay: thread.roadmapDay,
+    intent: thread.intent as ThreadSummary['intent'],
     title: thread.title,
     status: thread.status as ThreadSummary['status'],
     forkedFromId: thread.forkedFromId,

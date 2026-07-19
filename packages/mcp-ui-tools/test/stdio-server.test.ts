@@ -98,7 +98,7 @@ afterAll(async () => {
 });
 
 describe('eduagent-ui over stdio (as codex spawns it)', () => {
-  it('lists all 8 ui_* tools with schemas', async () => {
+  it('lists all 9 ui_* tools with schemas', async () => {
     const res = await request('tools/list', {});
     const tools = (res.result as { tools: Array<{ name: string; inputSchema: unknown }> }).tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -110,6 +110,7 @@ describe('eduagent-ui over stdio (as codex spawns it)', () => {
       'ui_push_exercise',
       'ui_push_quiz',
       'ui_record_assessment',
+      'ui_session_wrap',
     ]);
   });
 

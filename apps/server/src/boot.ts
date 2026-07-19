@@ -8,6 +8,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
+import { UI_TOOL_NAMES } from '@eduagent/shared';
 import { WsGateway } from './api/gateway.js';
 import {
   AppServerClient,
@@ -16,7 +17,7 @@ import {
   type HealthProbe,
 } from './codex/index.js';
 import type { AppConfig } from './config.js';
-import { DashboardService, ExamService, ReviewService } from './learning/index.js';
+import { DashboardService, ExamService, ReviewService, TrackService } from './learning/index.js';
 import { installedSkillsRoot, SKILL_NAMES } from './prompts/index.js';
 import { UiToolRelay } from './relay/index.js';
 import { ThreadManager } from './threads/index.js';
@@ -49,6 +50,7 @@ export interface AppServices {
   dashboard: DashboardService;
   review: ReviewService;
   exams: ExamService;
+  tracks: TrackService;
 }
 
 export interface CreateServicesDeps {
@@ -122,6 +124,15 @@ export async function createServices({
     dailyTurnQuota: config.dailyTurnQuota,
   });
   const review = new ReviewService({ prisma, workspaces, threads, logger });
+  const tracks = new TrackService({
+    prisma,
+    workspaces,
+    threads,
+    memory,
+    sink: gateway,
+    logger,
+  });
+  await tracks.sweepStaleGenerating();
   const exams = new ExamService({ prisma, workspaces, threads, dashboard, sink: gateway, logger });
   // Deadline enforcement (plans/03 §3.5): expired in_progress exams
   // auto-submit with their last autosaved answers. app.close() stops it.
@@ -138,6 +149,7 @@ export async function createServices({
     dashboard,
     review,
     exams,
+    tracks,
   };
 }
 
@@ -189,13 +201,22 @@ async function assertSkillsVisible(
  * its tools — a broken registration would otherwise surface only as baffling
  * mid-lesson tool failures.
  */
-async function assertUiToolsVisible(client: AppServerClient, logger: CodexLogger): Promise<void> {
+export async function assertUiToolsVisible(
+  client: {
+    listMcpServerStatus(): Promise<{
+      data: Array<{ name: string; tools?: Record<string, unknown> | null }>;
+    }>;
+  },
+  logger: CodexLogger,
+): Promise<void> {
   const status = await client.listMcpServerStatus();
   const entry = status.data.find((server) => server.name === UI_TOOLS_SERVER_NAME);
   const toolNames = Object.keys(entry?.tools ?? {});
-  if (entry === undefined || toolNames.length === 0) {
+  const missing = UI_TOOL_NAMES.filter((name) => !toolNames.includes(name));
+  if (entry === undefined || missing.length > 0) {
     throw new Error(
-      `codex did not report the "${UI_TOOLS_SERVER_NAME}" MCP server (or it exposes no tools) — ` +
+      `codex did not report every "${UI_TOOLS_SERVER_NAME}" MCP tool` +
+        `${missing.length > 0 ? ` (missing: ${missing.join(', ')})` : ''} — ` +
         'check the mcp_servers spawn overrides and the mcp-ui-tools entry (see codex stderr in logs)',
     );
   }

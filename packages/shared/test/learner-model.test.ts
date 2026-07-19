@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   masteryFileSchema,
   profileFrontmatterSchema,
+  roadmapFileSchema,
   sessionLogFrontmatterSchema,
   srsQueueFileSchema,
   trackFileSchema,
+  trackBriefFrontmatterSchema,
 } from '../src/index';
 
 describe('profileFrontmatterSchema', () => {
@@ -132,6 +134,58 @@ describe('trackFileSchema', () => {
 
   it('rejects an empty curriculum', () => {
     expect(trackFileSchema.safeParse({ ...valid, items: [] }).success).toBe(false);
+  });
+});
+
+describe('roadmapFileSchema', () => {
+  const valid = {
+    track: 'sql-interview',
+    created: '2026-07-19',
+    schedule: { study_days: ['mon', 'wed', 'fri'], minutes_per_day: 45, start_date: '2026-07-19' },
+    days: Array.from({ length: 5 }, (_, index) => ({
+      day: index + 1,
+      title: `Day ${index + 1}`,
+      status: index === 0 ? 'complete' : 'upcoming',
+      ...(index === 0 ? { completed_on: '2026-07-20' } : {}),
+      topics: [{ topic: 'sql', concepts: ['select-basics'] }],
+      subtopics: ['One', 'Two'],
+    })),
+  };
+
+  it('accepts the exact roadmap shape and completion invariant', () => {
+    expect(roadmapFileSchema.parse(valid).days).toHaveLength(5);
+  });
+
+  it('rejects non-contiguous days and invalid completion dates', () => {
+    const gap = structuredClone(valid);
+    gap.days[2]!.day = 4;
+    expect(roadmapFileSchema.safeParse(gap).success).toBe(false);
+    const missing = structuredClone(valid);
+    delete missing.days[0]!.completed_on;
+    expect(roadmapFileSchema.safeParse(missing).success).toBe(false);
+    const premature = structuredClone(valid);
+    premature.days[1]!.completed_on = '2026-07-21';
+    expect(roadmapFileSchema.safeParse(premature).success).toBe(false);
+  });
+});
+
+describe('trackBriefFrontmatterSchema', () => {
+  it('accepts the exact brief frontmatter and rejects unknown enum values', () => {
+    expect(
+      trackBriefFrontmatterSchema.parse({
+        track: 'sql-interview',
+        goal_type: 'interview',
+        target_date: '2026-09-01',
+        source: 'job-description',
+      }).track,
+    ).toBe('sql-interview');
+    expect(
+      trackBriefFrontmatterSchema.safeParse({
+        track: 'sql-interview',
+        goal_type: 'interview',
+        source: 'web',
+      }).success,
+    ).toBe(false);
   });
 });
 

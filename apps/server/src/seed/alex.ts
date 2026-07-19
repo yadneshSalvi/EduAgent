@@ -655,7 +655,7 @@ class AlexGenerator {
     for (const item of track.items) {
       lines.push(`  - concept: ${item.concept}`, `    topic: ${item.topic}`, `    weight: ${item.weight}`);
     }
-    await this.write(`tracks/${track.track}.yaml`, lines.join('\n') + '\n');
+    await this.write(`tracks/${track.track}/track.yaml`, lines.join('\n') + '\n');
   }
 
   private async writeMastery(topic: string, instant: Date): Promise<void> {

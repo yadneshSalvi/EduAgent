@@ -3,11 +3,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   profileFrontmatterSchema,
+  roadmapFileSchema,
   sessionLogFrontmatterSchema,
   srsQueueFileSchema,
   trackFileSchema,
   masteryFileSchema,
   type SrsQueueFile,
+  type RoadmapFile,
   type TrackFile,
 } from '@eduagent/shared';
 import { workspacePathFor, type AppConfig } from '../config.js';
@@ -130,7 +132,7 @@ export class WorkspaceManager {
     flag('profile.md', profileRead.needsRepair);
 
     const tracks: TrackFile[] = [];
-    for (const relPath of await this.discover(dir, tracked, 'tracks', /\.ya?ml$/)) {
+    for (const relPath of await this.discoverTrackFiles(dir, tracked, 'track.yaml')) {
       const read = await readValidated(dir, git, relPath, (raw) =>
         parseYamlFile(trackFileSchema, raw),
       );
@@ -138,6 +140,16 @@ export class WorkspaceManager {
       if (read.value) tracks.push(read.value);
     }
     tracks.sort((a, b) => a.track.localeCompare(b.track));
+
+    const roadmaps: RoadmapFile[] = [];
+    for (const relPath of await this.discoverTrackFiles(dir, tracked, 'roadmap.yaml')) {
+      const read = await readValidated(dir, git, relPath, (raw) =>
+        parseYamlFile(roadmapFileSchema, raw),
+      );
+      flag(relPath, read.needsRepair);
+      if (read.value) roadmaps.push(read.value);
+    }
+    roadmaps.sort((a, b) => a.track.localeCompare(b.track));
 
     const topics: TopicModel[] = [];
     for (const topic of await this.discoverTopics(dir, tracked)) {
@@ -176,6 +188,7 @@ export class WorkspaceManager {
     return {
       profile: profileRead.value,
       tracks,
+      roadmaps,
       topics,
       srs,
       lastSession,
@@ -232,6 +245,34 @@ export class WorkspaceManager {
       const match =
         relPath.startsWith(`${subdir}/`) && !relPath.slice(subdir.length + 1).includes('/');
       if (match && pattern.test(relPath)) found.add(relPath);
+    }
+    return [...found].sort();
+  }
+
+  /**
+   * Track-layout discovery is directory-aware while discover() deliberately
+   * remains flat for sessions and other one-level collections.
+   */
+  private async discoverTrackFiles(
+    dir: string,
+    tracked: string[],
+    filename: 'track.yaml' | 'roadmap.yaml',
+  ): Promise<string[]> {
+    const found = new Set<string>();
+    try {
+      for (const entry of await fs.readdir(path.join(dir, 'tracks'), { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const relPath = `tracks/${entry.name}/${filename}`;
+        if (existsSync(path.join(dir, relPath))) found.add(relPath);
+      }
+    } catch {
+      // tracks/ absent on disk — tracked paths may still be recoverable
+    }
+    for (const relPath of tracked) {
+      const segments = relPath.split('/');
+      if (segments.length === 3 && segments[0] === 'tracks' && segments[2] === filename) {
+        found.add(relPath);
+      }
     }
     return [...found].sort();
   }

@@ -26,6 +26,7 @@ const TYPE_BADGE: Record<MemoryCommitType, string> = {
   profile: 'bg-surface-2 text-muted-foreground',
   seed: 'bg-surface-2 text-muted-foreground',
   system: 'bg-surface-2 text-muted-foreground',
+  plan: 'bg-accent-soft text-primary-legible',
 };
 
 function TimelineRow({

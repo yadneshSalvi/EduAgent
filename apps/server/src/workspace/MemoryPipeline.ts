@@ -85,13 +85,27 @@ export class MemoryPipeline {
       );
     }
 
-    const commits = await git.log(ctx.sinceSha ? { from: ctx.sinceSha } : {});
+    return this.emitCommits(ctx.userId, ctx.sinceSha, { threadId: ctx.threadId });
+  }
+
+  /**
+   * Emits every commit after `sinceSha`, oldest first. Server-authored plan
+   * commits use this same path as completed agent turns so ActivityEvent,
+   * socket payload, diff filtering, and dashboard invalidation cannot drift.
+   */
+  async emitCommits(
+    userId: string,
+    sinceSha: string | null,
+    opts: { threadId?: string } = {},
+  ): Promise<MemoryCommit[]> {
+    const git = this.workspaces.git(userId);
+    const commits = await git.log(sinceSha ? { from: sinceSha } : {});
     const events: MemoryCommit[] = [];
     for (const info of [...commits].reverse()) {
       let parsed: ParsedMemoryCommit | null = parseCommit(info.message);
       if (!parsed) {
         this.logger.warn(
-          { tag: 'prompt-bug', threadId: ctx.threadId, sha: info.sha, message: info.message },
+          { tag: 'prompt-bug', threadId: opts.threadId, sha: info.sha, message: info.message },
           'memory commit does not follow the commit grammar',
         );
         parsed = {
@@ -112,10 +126,10 @@ export class MemoryPipeline {
       };
       await this.prisma.activityEvent.create({
         data: {
-          userId: ctx.userId,
+          userId,
           kind: 'commit',
           meta: {
-            threadId: ctx.threadId,
+            ...(opts.threadId !== undefined ? { threadId: opts.threadId } : {}),
             sha: commit.sha,
             type: commit.type,
             topic: commit.topic,
@@ -126,11 +140,11 @@ export class MemoryPipeline {
           } satisfies Prisma.InputJsonValue,
         },
       });
-      this.emitter.emitToUser(ctx.userId, { type: 'memory.commit', commit });
+      this.emitter.emitToUser(userId, { type: 'memory.commit', commit });
       events.push(commit);
     }
 
-    if (events.length > 0) this.onMemoryChanged?.(ctx.userId);
+    if (events.length > 0) this.onMemoryChanged?.(userId);
     return events;
   }
 }

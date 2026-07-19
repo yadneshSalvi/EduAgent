@@ -8,7 +8,7 @@ import {
 } from '../src/index';
 
 describe('ui tool arg schemas', () => {
-  it('exposes all eight tools by wire name', () => {
+  it('exposes all nine tools by wire name', () => {
     expect(Object.keys(uiToolArgSchemas).sort()).toEqual([
       'ui_create_exam',
       'ui_grade_exam',
@@ -18,6 +18,7 @@ describe('ui tool arg schemas', () => {
       'ui_push_exercise',
       'ui_push_quiz',
       'ui_record_assessment',
+      'ui_session_wrap',
     ]);
   });
 

@@ -26,7 +26,11 @@ workspace/
 ├── README.md                   # this file
 ├── profile.md                  # who you are: goals, background, preferences
 ├── tracks/
-│   └── <track>.yaml            # goal-oriented curriculum: ordered concepts + weights
+│   └── <track>/
+│       ├── track.yaml          # ordered concepts + weights
+│       ├── roadmap.yaml        # completion-paced day-by-day plan
+│       ├── brief.md            # distilled goal and constraints
+│       └── sources/            # learner-provided source material
 ├── topics/
 │   └── <topic>/
 │       ├── mastery.yaml        # concept nodes with 0–1 mastery scores — THE core file
@@ -55,7 +59,7 @@ workspace/
   justifying every score change. Concepts are never deleted, only annotated.
 - \`topics/<topic>/misconceptions.md\` — \`## [OPEN] …\` / \`## [RESOLVED <date>] …\`
   entries with evidence and a remediation plan.
-- \`tracks/<track>.yaml\` — \`track\`, \`display_name\`, optional
+- \`tracks/<track>/track.yaml\` — \`track\`, \`display_name\`, optional
   \`target_date\`, and \`items\`: the ordered curriculum (\`concept\`,
   \`topic\`, \`weight\`) whose weights drive your readiness score.
 - \`srs/queue.yaml\` — \`items\` of SM-2-style spaced repetition: \`concept\`,
@@ -65,7 +69,7 @@ workspace/
   narrative of the sitting.
 
 Commit messages follow \`<type>(<topic>): <headline>\` where type is one of
-learn, review, exam, misconception, profile, seed, system — mastery changes
+learn, review, exam, misconception, profile, seed, system, plan — mastery changes
 appear in the headline as \`concept-id 0.40→0.72\`.
 
 You can edit these files yourself, but the tutor is the bookkeeper: if you

@@ -19,6 +19,7 @@ export const MODE_INSTRUCTIONS_TOKEN_BUDGET = 800;
  * the instructions themselves — a deliberate exception to the lean budget.
  */
 export const ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET = 1_700;
+export const PLAN_INSTRUCTIONS_TOKEN_BUDGET = 1_700;
 
 /**
  * Exam templates carry the full generation/grading procedure plus the

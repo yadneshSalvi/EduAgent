@@ -28,6 +28,7 @@ model User {
   exams         Exam[]
   exercises     Exercise[]
   activity      ActivityEvent[]
+  tracks        Track[]
 }
 
 // No session table: Clerk owns sessions (agent host verifies its JWTs statelessly).
@@ -40,9 +41,11 @@ model Thread {
   userId        String
   user          User     @relation(fields: [userId], references: [id])
   codexThreadId String   @unique
-  mode          String // "learn" | "review" | "exam"
+  mode          String // "learn" | "review" | "exam" | "plan"
   topicSlug     String?
   trackSlug     String?
+  roadmapDay    Int?
+  intent        String? // teach | revise | mistakes (track learn sessions only)
   title         String
   status        String   @default("active") // active | archived
   forkedFromId  String? // exam threads: parent learn thread
@@ -50,6 +53,25 @@ model Thread {
   createdAt     DateTime @default(now())
   lastActiveAt  DateTime @default(now())
   items         ItemMirror[]
+}
+
+// Listing/state-machine plumbing for learning tracks. Curriculum, roadmap,
+// brief, and source material remain versioned workspace files.
+model Track {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  slug         String
+  title        String
+  goalType     String
+  status       String   @default("intake") // intake | generating | active | completed | archived | failed
+  intake       Json
+  accent       String   @default("")
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  @@unique([userId, slug])
+  @@index([userId, lastActiveAt])
 }
 
 // Mirror of streamed items for instant history render + resilience

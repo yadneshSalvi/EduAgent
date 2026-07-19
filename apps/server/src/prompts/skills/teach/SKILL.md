@@ -142,3 +142,4 @@ it's time to wrap:
    `memory` skill.
 4. Commit (grammar per the `memory` skill). A session must never end with an
    uncommitted workspace.
+5. Track sessions: finish by calling `ui_session_wrap`.

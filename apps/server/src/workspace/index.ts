@@ -28,4 +28,5 @@ export {
 } from './MemoryPipeline.js';
 export { formatStateDigest, type DigestOptions } from './digest.js';
 export { effectiveMastery, halfLifeDays, isFading } from './learning-math.js';
+export { parseFrontmatterFile, parseYamlFile } from './learner-files.js';
 export type { LearnerModel, SessionSummary, TopicModel } from './model.js';

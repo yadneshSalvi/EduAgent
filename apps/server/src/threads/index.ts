@@ -15,4 +15,5 @@ export {
   type ThreadEventSink,
   type ThreadManagerDeps,
   type ThreadService,
+  type TrackThreadService,
 } from './ThreadManager.js';

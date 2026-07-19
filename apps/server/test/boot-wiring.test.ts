@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { v2 } from '@eduagent/shared/protocol';
-import { UI_TOOLS_SERVER_NAME, uiToolElicitationApprover, uiToolsServerSpec } from '../src/boot.js';
+import { UI_TOOL_NAMES } from '@eduagent/shared';
+import {
+  assertUiToolsVisible,
+  UI_TOOLS_SERVER_NAME,
+  uiToolElicitationApprover,
+  uiToolsServerSpec,
+} from '../src/boot.js';
 import { redactForLog } from '../src/codex/AppServerClient.js';
 import type { ElicitationContext } from '../src/codex/index.js';
 import { loadConfig } from '../src/config.js';
@@ -51,6 +57,27 @@ describe('uiToolsServerSpec', () => {
   });
 });
 
+describe('assertUiToolsVisible', () => {
+  const logger = { debug() {}, info() {}, warn() {}, error() {} };
+  it('requires every shared UI tool name, not merely a non-empty server', async () => {
+    const status = (names: string[]) => ({
+      listMcpServerStatus: () =>
+        Promise.resolve({
+          data: [
+            {
+              name: UI_TOOLS_SERVER_NAME,
+              tools: Object.fromEntries(names.map((name) => [name, { name }])),
+            },
+          ],
+        }),
+    });
+    await expect(assertUiToolsVisible(status(UI_TOOL_NAMES), logger)).resolves.toBeUndefined();
+    await expect(assertUiToolsVisible(status(UI_TOOL_NAMES.slice(0, -1)), logger)).rejects.toThrow(
+      'ui_session_wrap',
+    );
+  });
+});
+
 describe('redactForLog (carry-over f)', () => {
   it('redacts developerInstructions (carries the sessionToken) from params', () => {
     const msg = {
@@ -84,9 +111,7 @@ describe('redactForLog (carry-over f)', () => {
     expect((redacted.params as { item: { arguments: string } }).item.arguments).toBe('[redacted]');
     expect((redacted.params as { item: { tool: string } }).item.tool).toBe('ui_push_artifact');
     // Original untouched.
-    expect(
-      (msg.params.item as { arguments: string }).arguments,
-    ).toContain('SECRET');
+    expect((msg.params.item as { arguments: string }).arguments).toContain('SECRET');
   });
 
   it('redacts elicitation _meta.tool_params (repeats the tool arguments)', () => {

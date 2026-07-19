@@ -43,6 +43,16 @@ describe('parseCommit (plans/02 §3 grammar)', () => {
     expect(parseCommit('system: initialize memory')?.type).toBe('system');
   });
 
+  it('parses plan commits with the track slug as topic', () => {
+    expect(parseCommit('plan(sql-interview): day 3 complete — CTEs')).toEqual({
+      type: 'plan',
+      topic: 'sql-interview',
+      headline: 'day 3 complete — CTEs',
+      bullets: [],
+      deltas: [],
+    });
+  });
+
   it('ignores delta-like text in body bullets', () => {
     const parsed = parseCommit(
       'review(sql): retrieval practice on joins\n\n- mastery inner-join 0.10→0.90 discussed',

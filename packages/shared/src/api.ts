@@ -82,7 +82,7 @@ export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
 // Threads
 // ---------------------------------------------------------------------------
 
-export const threadModeSchema = z.enum(['learn', 'review', 'exam']);
+export const threadModeSchema = z.enum(['learn', 'review', 'exam', 'plan']);
 export type ThreadMode = z.infer<typeof threadModeSchema>;
 
 export const threadSummarySchema = z.object({
@@ -90,6 +90,8 @@ export const threadSummarySchema = z.object({
   mode: threadModeSchema,
   topicSlug: slugSchema.nullable(),
   trackSlug: slugSchema.nullable(),
+  roadmapDay: z.number().int().positive().nullable(),
+  intent: z.enum(['teach', 'revise', 'mistakes']).nullable(),
   title: z.string(),
   status: z.enum(['active', 'archived']),
   /** Exam threads: the parent learn thread they were forked from. */
@@ -100,7 +102,10 @@ export const threadSummarySchema = z.object({
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
 /** GET /api/threads?mode= */
-export const listThreadsQuerySchema = z.object({ mode: threadModeSchema.optional() });
+export const listThreadsQuerySchema = z.object({
+  mode: threadModeSchema.optional(),
+  track: slugSchema.optional(),
+});
 export type ListThreadsQuery = z.infer<typeof listThreadsQuerySchema>;
 
 export const listThreadsResponseSchema = z.object({ threads: z.array(threadSummarySchema) });
@@ -122,7 +127,7 @@ export const threadItemSchema = z.object({
   id: z.string().min(1),
   codexItemId: z.string().nullable(),
   role: z.enum(['user', 'agent', 'system']),
-  kind: z.enum(['message', 'reasoning', 'exec', 'tool_call', 'quiz', 'exercise_ref']),
+  kind: z.enum(['message', 'reasoning', 'exec', 'tool_call', 'quiz', 'exercise_ref', 'wrap']),
   payload: z.unknown(),
   createdAt: z.string().min(1),
 });

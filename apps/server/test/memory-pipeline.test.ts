@@ -182,6 +182,21 @@ describe('MemoryPipeline (real temp repo + real test db)', () => {
     expect(await prisma.activityEvent.count()).toBe(2);
   });
 
+  it('reuses emitCommits for an out-of-turn server plan commit', async () => {
+    const sinceSha = await pipeline.beforeTurn(USER);
+    await write('tracks/sql-interview/roadmap.yaml', 'track: sql-interview\n');
+    await workspaces.git(USER).commitAll('plan(sql-interview): day 3 complete — CTEs');
+
+    const events = await pipeline.emitCommits(USER, sinceSha);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'plan', topic: 'sql-interview' });
+    expect(emitted).toHaveLength(1);
+    const row = await prisma.activityEvent.findFirstOrThrow({ where: { userId: USER } });
+    expect(row.meta).toMatchObject({ type: 'plan', topic: 'sql-interview' });
+    expect(row.meta).not.toHaveProperty('threadId');
+    expect(invalidated).toEqual([USER]);
+  });
+
   it('broadcasts non-grammar commits as system type with a prompt-bug warning', async () => {
     const sinceSha = await pipeline.beforeTurn(USER);
     await write('scratch.md', 'x');

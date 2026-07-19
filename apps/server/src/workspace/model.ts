@@ -1,6 +1,7 @@
 import type {
   MasteryFile,
   ProfileFrontmatter,
+  RoadmapFile,
   SessionLogFrontmatter,
   SrsQueueFile,
   TrackFile,
@@ -32,6 +33,8 @@ export interface LearnerModel {
   /** null until onboarding writes profile.md. */
   profile: { frontmatter: ProfileFrontmatter; body: string } | null;
   tracks: TrackFile[];
+  /** Versioned per-track plans recovered from tracks/<slug>/roadmap.yaml. */
+  roadmaps: RoadmapFile[];
   topics: TopicModel[];
   srs: SrsQueueFile;
   /** Most recent session log (filenames are date-prefixed, so max sorts last). */

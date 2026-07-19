@@ -145,6 +145,39 @@ describe('auth', () => {
   });
 });
 
+describe('ui_session_wrap', () => {
+  const args = {
+    day: 3,
+    summary_md: 'Practised JOIN result shapes.\nNULL handling still needs one more pass.',
+    concept_deltas: [{ topic: 'sql', concept: 'inner-join', from: 0.4, to: 0.6 }],
+  };
+
+  it('rejects non-track threads with self-correcting guidance', async () => {
+    const result = await call('ui_session_wrap', args);
+    expect(result.status).toBe(400);
+    expect((result.body as { error: string }).error).toMatch(/only for a learning-track session/i);
+  });
+
+  it('mirrors a wrap and emits session.wrap only for the matching roadmap day', async () => {
+    await prisma.thread.update({
+      where: { id: thread.id },
+      data: { trackSlug: 'sql-interview', roadmapDay: 3, intent: 'teach' },
+    });
+    const wrong = await call('ui_session_wrap', { ...args, day: 4 });
+    expect(wrong.status).toBe(400);
+    const result = await call('ui_session_wrap', args);
+    expect(result.status).toBe(200);
+    const mirror = await prisma.itemMirror.findFirstOrThrow({ where: { threadId: thread.id } });
+    expect(mirror).toMatchObject({ role: 'agent', kind: 'wrap' });
+    expect(mirror.payload).toMatchObject({ day: 3, summary_md: args.summary_md });
+    expect(sink.records).toContainEqual({
+      target: 'thread',
+      id: thread.id,
+      event: { type: 'session.wrap', threadId: thread.id, wrap: args },
+    });
+  });
+});
+
 describe('ui_push_exercise', () => {
   it('persists the Exercise row, mirrors it, and emits workbench.exercise WITHOUT token/tests_path', async () => {
     await writeTests('ex-001');

@@ -240,6 +240,30 @@ describe('cache behavior', () => {
     const bypass = await service.get(userId, { now: FIXTURE_NOW });
     expect(bypass).not.toBe(third);
   });
+
+  it('keys track-scoped variants separately and invalidates every variant', async () => {
+    const global = await service.get(userId);
+    const scoped = await service.get(userId, { track: 'sql-interview' });
+    expect(await service.get(userId, { track: 'sql-interview' })).toBe(scoped);
+    service.invalidate(userId);
+    expect(await service.get(userId)).not.toBe(global);
+    expect(await service.get(userId, { track: 'sql-interview' })).not.toBe(scoped);
+  });
+});
+
+describe('track filter', () => {
+  it('scopes readiness/topics/decay/timeline while preserving global reviews', async () => {
+    const scoped = await service.get(userId, { now: FIXTURE_NOW, track: 'sql-interview' });
+    expect(scoped.readiness.map((entry) => entry.track)).toEqual(['sql-interview']);
+    expect(scoped.topics.map((entry) => entry.topic)).toEqual(['sql']);
+    expect(scoped.decaySeries.length).toBeGreaterThan(0);
+    expect(scoped.timeline.every((entry) => entry.topic === 'sql')).toBe(true);
+    expect(scoped.reviewQueue).toEqual(data.reviewQueue);
+  });
+
+  it('keeps the no-param payload byte-for-byte identical to the pre-filter build', async () => {
+    expect(await service.get(userId, { now: FIXTURE_NOW })).toEqual(data);
+  });
 });
 
 describe('workspace-less user', () => {

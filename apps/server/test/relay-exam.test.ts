@@ -146,8 +146,10 @@ beforeEach(async () => {
   cleanup = dataDir.cleanup;
   workspaces = new WorkspaceManager(dataDir.config);
   await workspaces.ensureWorkspace(USER_ID);
+  const trackPath = path.join(workspaces.pathFor(USER_ID), 'tracks', TRACK, 'track.yaml');
+  await fs.mkdir(path.dirname(trackPath), { recursive: true });
   await fs.writeFile(
-    path.join(workspaces.pathFor(USER_ID), 'tracks', `${TRACK}.yaml`),
+    trackPath,
     [
       `track: ${TRACK}`,
       'display_name: SQL Interview Prep',

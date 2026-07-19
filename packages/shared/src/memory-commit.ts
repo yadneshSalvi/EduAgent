@@ -10,6 +10,7 @@ export const memoryCommitTypeSchema = z.enum([
   'profile',
   'seed',
   'system',
+  'plan',
 ]);
 export type MemoryCommitType = z.infer<typeof memoryCommitTypeSchema>;
 
@@ -18,7 +19,7 @@ export type MemoryCommitType = z.infer<typeof memoryCommitTypeSchema>;
  * `profile: initialize learner model` has no topic.
  */
 export const MEMORY_COMMIT_HEADER_RE =
-  /^(learn|review|exam|misconception|profile|seed|system)(?:\(([a-z0-9]+(?:-[a-z0-9]+)*)\))?: (.+)$/;
+  /^(learn|review|exam|misconception|profile|seed|system|plan)(?:\(([a-z0-9]+(?:-[a-z0-9]+)*)\))?: (.+)$/;
 
 /**
  * Mastery deltas in the headline, exact form `conceptid A→B` (`02` §3).

@@ -79,8 +79,8 @@ describe('seeded workspace files', () => {
   it('profile, tracks, mastery, srs and ALL session logs parse under the shared schemas', async () => {
     const read = (rel: string) => fs.readFile(path.join(alexDir, rel), 'utf8');
     parseFrontmatterFile(profileFrontmatterSchema, await read('profile.md'));
-    parseYamlFile(trackFileSchema, await read('tracks/sql-interview.yaml'));
-    parseYamlFile(trackFileSchema, await read('tracks/python-dsa.yaml'));
+    parseYamlFile(trackFileSchema, await read('tracks/sql-interview/track.yaml'));
+    parseYamlFile(trackFileSchema, await read('tracks/python-dsa/track.yaml'));
     parseYamlFile(masteryFileSchema, await read('topics/sql/mastery.yaml'));
     parseYamlFile(masteryFileSchema, await read('topics/python/mastery.yaml'));
     parseYamlFile(srsQueueFileSchema, await read('srs/queue.yaml'));

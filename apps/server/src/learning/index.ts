@@ -23,3 +23,12 @@ export {
 } from './exam-config.js';
 export { ReviewService, NothingDueError, type ReviewServiceDeps } from './ReviewService.js';
 export { dueSummary, nextDueProjection, type DueSummary } from './SrsEngine.js';
+export {
+  slugify,
+  TrackDayError,
+  TrackNotFoundError,
+  TrackService,
+  TrackSlugTakenError,
+  TrackStateError,
+  type TrackServiceDeps,
+} from './TrackService.js';

@@ -87,7 +87,7 @@ describe('WorkspaceManager', () => {
     await write('profile.md', PROFILE_MD);
     await write('topics/sql/mastery.yaml', MASTERY_YAML);
     await write('topics/sql/misconceptions.md', MISCONCEPTIONS_MD);
-    await write('tracks/sql-interview.yaml', TRACK_YAML);
+    await write('tracks/sql-interview/track.yaml', TRACK_YAML);
     await write('sessions/2026-07-16-sql-joins.md', SESSION_MD);
     await manager.git(USER).commitAll('learn(sql): populate fixtures');
   }
@@ -190,9 +190,9 @@ describe('WorkspaceManager', () => {
     it('recovers a deleted tracked file from HEAD and flags it', async () => {
       await manager.ensureWorkspace(USER);
       await populateAndCommit();
-      await fs.rm(path.join(manager.pathFor(USER), 'tracks', 'sql-interview.yaml'));
+      await fs.rm(path.join(manager.pathFor(USER), 'tracks', 'sql-interview', 'track.yaml'));
       const model = await manager.readLearnerModel(USER);
-      expect(model.needsRepair).toContain('tracks/sql-interview.yaml');
+      expect(model.needsRepair).toContain('tracks/sql-interview/track.yaml');
       expect(model.tracks.map((t) => t.track)).toEqual(['sql-interview']);
     });
   });

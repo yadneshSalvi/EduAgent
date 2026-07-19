@@ -203,6 +203,22 @@ export const uiGradeExamArgsSchema = z.object({
 });
 export type UiGradeExamArgs = z.infer<typeof uiGradeExamArgsSchema>;
 
+export const sessionWrapConceptDeltaSchema = z.object({
+  topic: slugSchema,
+  concept: slugSchema,
+  from: masteryScoreSchema,
+  to: masteryScoreSchema,
+});
+
+export const uiSessionWrapArgsSchema = z.object({
+  session_token: sessionToken,
+  day: z.number().int().positive(),
+  summary_md: z.string().min(1),
+  concept_deltas: z.array(sessionWrapConceptDeltaSchema).optional(),
+});
+export type UiSessionWrapArgs = z.infer<typeof uiSessionWrapArgsSchema>;
+export const sessionWrapPayloadSchema = uiSessionWrapArgsSchema.omit({ session_token: true });
+
 /** All UI tools by wire name — the source for MCP tool definitions and relay dispatch. */
 export const uiToolArgSchemas = {
   ui_push_exercise: uiPushExerciseArgsSchema,
@@ -213,6 +229,7 @@ export const uiToolArgSchemas = {
   ui_record_assessment: uiRecordAssessmentArgsSchema,
   ui_create_exam: uiCreateExamArgsSchema,
   ui_grade_exam: uiGradeExamArgsSchema,
+  ui_session_wrap: uiSessionWrapArgsSchema,
 } as const;
 export type UiToolName = keyof typeof uiToolArgSchemas;
 export type UiToolArgs = { [K in UiToolName]: z.infer<(typeof uiToolArgSchemas)[K]> };
@@ -257,6 +274,10 @@ export const uiToolDescriptions: Record<UiToolName, string> = {
   ui_grade_exam:
     'Deliver per-question exam grades, the total, and the readiness delta after grading every ' +
     'answer (run coding answers against their tests; rubric-grade short answers).',
+  ui_session_wrap:
+    'Close a learning-track session with its roadmap day, a concise two-line summary, and ' +
+    'optional concept deltas. Call after the session log and commit, or immediately when the ' +
+    'learner asks to wrap up. This presents learner-chosen next actions; it never completes a day.',
 };
 
 // ---------------------------------------------------------------------------

@@ -141,7 +141,7 @@ export async function seedFixtureWorkspace(dir: string, now: Date): Promise<Fixt
     ].join('\n') + '\n',
   );
   await write(
-    'tracks/sql-interview.yaml',
+    'tracks/sql-interview/track.yaml',
     [
       'track: sql-interview',
       'display_name: SQL Interview Prep',

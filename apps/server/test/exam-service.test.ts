@@ -266,6 +266,35 @@ describe('create', () => {
     expect(threads.forks).toHaveLength(0);
   });
 
+  it("prefers the target track's learn thread over a newer thread from another track", async () => {
+    const targetParent = await prisma.thread.create({
+      data: {
+        userId: USER_ID,
+        codexThreadId: 'cdx-target-track-parent',
+        mode: 'learn',
+        trackSlug: TRACK,
+        title: 'SQL day',
+        sessionToken: 'tok-target-track-parent',
+        lastActiveAt: new Date('2026-07-18T10:00:00Z'),
+      },
+    });
+    await prisma.thread.create({
+      data: {
+        userId: USER_ID,
+        codexThreadId: 'cdx-other-track-parent',
+        mode: 'learn',
+        trackSlug: 'python-dsa',
+        title: 'Python day',
+        sessionToken: 'tok-other-track-parent',
+        lastActiveAt: new Date('2026-07-19T10:00:00Z'),
+      },
+    });
+    const { examId } = await service.create(USER_ID, { trackSlug: TRACK, durationMin: 30 });
+    const exam = await prisma.exam.findUniqueOrThrow({ where: { id: examId } });
+    const examThread = await prisma.thread.findUniqueOrThrow({ where: { id: exam.threadId! } });
+    expect(examThread.forkedFromId).toBe(targetParent.id);
+  });
+
   it('pins the exam ignore pattern into .git/info/exclude (idempotently)', async () => {
     await service.create(USER_ID, { trackSlug: TRACK, durationMin: 30 });
     await service.create(USER_ID, { trackSlug: TRACK, durationMin: 30 });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isoDateSchema, slugSchema } from '../common';
 
-/** One curriculum item in `tracks/<track>.yaml`; weight = importance for readiness (`02` §2.4). */
+/** One curriculum item in `tracks/<track>/track.yaml`; weight = importance for readiness. */
 export const trackItemSchema = z.object({
   concept: slugSchema,
   topic: slugSchema,
@@ -9,7 +9,7 @@ export const trackItemSchema = z.object({
 });
 export type TrackItem = z.infer<typeof trackItemSchema>;
 
-/** `tracks/<track>.yaml` — goal-oriented curriculum over topics. */
+/** `tracks/<track>/track.yaml` — goal-oriented curriculum over topics. */
 export const trackFileSchema = z.object({
   track: slugSchema,
   display_name: z.string().min(1),

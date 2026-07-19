@@ -94,34 +94,49 @@ export class DashboardService {
    * The dashboard payload, cached per user. Passing an explicit `now`
    * (tests, deterministic builds) bypasses the cache entirely.
    */
-  async get(userId: string, opts: { now?: Date } = {}): Promise<DashboardData> {
-    if (opts.now !== undefined) return this.build(userId, opts.now);
-    const hit = this.cache.get(userId);
+  async get(userId: string, opts: { now?: Date; track?: string } = {}): Promise<DashboardData> {
+    if (opts.now !== undefined) return this.build(userId, opts.now, opts.track);
+    const key = cacheKey(userId, opts.track);
+    const hit = this.cache.get(key);
     if (hit !== undefined && hit.expiresAt > Date.now()) return hit.data;
-    const inFlight = this.pending.get(userId);
+    const inFlight = this.pending.get(key);
     if (inFlight !== undefined) return inFlight;
-    const generation = this.generations.get(userId) ?? 0;
-    const promise = this.build(userId, new Date())
+    const generation = this.generations.get(key) ?? 0;
+    const promise = this.build(userId, new Date(), opts.track)
       .then((data) => {
-        if ((this.generations.get(userId) ?? 0) === generation) {
-          this.cache.set(userId, { data, expiresAt: Date.now() + this.cacheTtlMs });
+        if ((this.generations.get(key) ?? 0) === generation) {
+          this.cache.set(key, { data, expiresAt: Date.now() + this.cacheTtlMs });
         }
         return data;
       })
-      .finally(() => this.pending.delete(userId));
-    this.pending.set(userId, promise);
+      .finally(() => {
+        if (this.pending.get(key) === promise) this.pending.delete(key);
+      });
+    this.pending.set(key, promise);
     return promise;
   }
 
   /** Called on memory commits (boot wiring) — next get() rebuilds. */
   invalidate(userId: string): void {
-    this.generations.set(userId, (this.generations.get(userId) ?? 0) + 1);
-    this.cache.delete(userId);
+    const prefix = `${userId}\u0000`;
+    const keys = new Set([
+      ...this.cache.keys(),
+      ...this.pending.keys(),
+      ...this.generations.keys(),
+    ]);
+    // Ensure the global variant is bumped even before its first cache entry.
+    keys.add(cacheKey(userId));
+    for (const key of keys) {
+      if (!key.startsWith(prefix)) continue;
+      this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
+      this.cache.delete(key);
+      this.pending.delete(key);
+    }
   }
 
   // ------------------------------------------------------------------ build
 
-  private async build(userId: string, now: Date): Promise<DashboardData> {
+  private async build(userId: string, now: Date, trackFilter?: string): Promise<DashboardData> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (user === null) throw new Error(`DashboardService: no such user ${userId}`);
 
@@ -153,10 +168,24 @@ export class DashboardService {
       now,
     );
 
-    const concepts = indexConcepts(model, now);
-    const topics = buildTopics(model, concepts);
-    const readiness = await this.buildReadiness(git, model, entries, concepts, now);
-    const decaySeries = buildDecaySeries(model, entries, now, today);
+    const selectedTrack = trackFilter
+      ? model.tracks.find((track) => track.track === trackFilter)
+      : undefined;
+    const topicSlugs = selectedTrack
+      ? new Set(selectedTrack.items.map((item) => item.topic))
+      : null;
+    const scopedModel: LearnerModel = trackFilter
+      ? {
+          ...model,
+          tracks: selectedTrack ? [selectedTrack] : [],
+          roadmaps: model.roadmaps.filter((roadmap) => roadmap.track === trackFilter),
+          topics: model.topics.filter((topic) => topicSlugs?.has(topic.topic)),
+        }
+      : model;
+    const concepts = indexConcepts(scopedModel, now);
+    const topics = buildTopics(scopedModel, concepts);
+    const readiness = await this.buildReadiness(git, scopedModel, entries, concepts, now);
+    const decaySeries = buildDecaySeries(scopedModel, entries, now, today);
     const reviewQueue = buildReviewQueue(model, today);
     const activity = await this.buildActivity(userId, timezone, today, now);
     const continueCta = buildContinueCta(model);
@@ -167,7 +196,15 @@ export class DashboardService {
       readiness,
       topics,
       decaySeries,
-      timeline: entries.slice(0, TIMELINE_LIMIT).map(stripInstant),
+      timeline: entries
+        .filter(
+          (entry) =>
+            trackFilter === undefined ||
+            topicSlugs?.has(entry.topic) ||
+            (entry.type === 'plan' && entry.topic === trackFilter),
+        )
+        .slice(0, TIMELINE_LIMIT)
+        .map(stripInstant),
       reviewQueue,
       activity,
     };
@@ -242,7 +279,7 @@ export class DashboardService {
     masteryCache: Map<string, MasteryFile | null>,
     cutoff: Date,
   ): Promise<number> {
-    const track = await this.fileAt(git, sha, `tracks/${trackSlug}.yaml`, trackFileSchema);
+    const track = await this.fileAt(git, sha, `tracks/${trackSlug}/track.yaml`, trackFileSchema);
     if (track === null) return 0;
     const items = [];
     for (const item of track.items) {
@@ -504,3 +541,5 @@ function buildDecaySeries(
 }
 
 const maxIso = (a: string, b: string): string => (a > b ? a : b);
+
+const cacheKey = (userId: string, track?: string): string => `${userId}\u0000${track ?? ''}`;

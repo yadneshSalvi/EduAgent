@@ -19,6 +19,7 @@ const TYPE_DOT: Record<MemoryCommitType, string> = {
   profile: 'bg-muted-foreground',
   seed: 'bg-muted-foreground',
   system: 'bg-muted-foreground',
+  plan: 'bg-primary',
 };
 
 export interface TimeMachineRange {

@@ -87,7 +87,7 @@ ${ONBOARDING_FILE_TEMPLATES.profileFrontmatter}
 - \`tracks\` entries and all slugs are kebab-case. Omit any unknown key
   entirely — never write null, empty, or "unspecified".
 
-tracks/<track>.yaml (8–15 ordered concepts toward their goal):
+tracks/<track>/track.yaml (8–15 ordered concepts toward their goal):
 
 ${ONBOARDING_FILE_TEMPLATES.track}
 
@@ -132,7 +132,7 @@ export function buildOnboardingInstructions(opts: OnboardingModeOptions): string
     '   or they ask to skip it, move on and seed conservative estimates from',
     '   the interview — never mention quizzes or tools being unavailable.',
     '3. When the graded answers arrive (or on skip): write `profile.md`,',
-    '   `tracks/<track>.yaml`, and `topics/<topic>/mastery.yaml` per the',
+    '   `tracks/<track>/track.yaml`, and `topics/<topic>/mastery.yaml` per the',
     '   templates below, seeding mastery from the quiz evidence (or the',
     '   interview).',
     ...(opts.learnerName

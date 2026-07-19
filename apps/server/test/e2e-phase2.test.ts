@@ -237,7 +237,7 @@ describe.runIf(enabled)('Phase 2 workbench golden path (real codex)', () => {
       ].join('\n'),
     );
     write(
-      'tracks/python-basics.yaml',
+      'tracks/python-basics/track.yaml',
       [
         'track: python-basics',
         'display_name: Python Basics',

@@ -25,6 +25,7 @@ function fixtureModel(): LearnerModel {
         items: [{ concept: 'inner-join', topic: 'sql', weight: 1.5 }],
       },
     ],
+    roadmaps: [],
     topics: [
       {
         topic: 'sql',
@@ -141,6 +142,7 @@ describe('formatStateDigest', () => {
       {
         profile: null,
         tracks: [],
+        roadmaps: [],
         topics: [],
         srs: { items: [] },
         lastSession: null,
@@ -150,6 +152,30 @@ describe('formatStateDigest', () => {
     );
     expect(digest).toContain('has not completed onboarding');
     expect(digest).toContain('Reviews due: none');
+  });
+
+  it('adds roadmap head progress to the track line', () => {
+    const model = fixtureModel();
+    model.roadmaps = [
+      {
+        track: 'sql-interview',
+        created: '2026-07-01',
+        schedule: {
+          study_days: ['mon', 'wed', 'fri'],
+          minutes_per_day: 45,
+          start_date: '2026-07-01',
+        },
+        days: Array.from({ length: 5 }, (_, index) => ({
+          day: index + 1,
+          title: `Topic ${index + 1}`,
+          status: index === 0 ? ('complete' as const) : ('upcoming' as const),
+          ...(index === 0 ? { completed_on: '2026-07-10' } : {}),
+          topics: [{ topic: 'sql', concepts: ['inner-join'] }],
+          subtopics: ['One', 'Two'],
+        })),
+      },
+    ];
+    expect(formatStateDigest(model, { now: NOW })).toContain('— day 2/5');
   });
 
   it('lists files needing repair', () => {

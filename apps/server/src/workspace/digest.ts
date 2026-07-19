@@ -45,11 +45,14 @@ export function formatStateDigest(model: LearnerModel, opts: DigestOptions = {})
   }
 
   if (model.tracks.length > 0) {
-    const shown = model.tracks
-      .slice(0, MAX_TRACKS)
-      .map(
-        (t) => `${t.display_name} (${t.track}${t.target_date ? `, target ${t.target_date}` : ''})`,
-      );
+    const shown = model.tracks.slice(0, MAX_TRACKS).map((t) => {
+      const roadmap = model.roadmaps.find((candidate) => candidate.track === t.track);
+      const head = roadmap?.days.find((day) => day.status === 'upcoming')?.day;
+      const progress = roadmap
+        ? ` — day ${head ?? roadmap.days.length}/${roadmap.days.length}`
+        : '';
+      return `${t.display_name} (${t.track}${t.target_date ? `, target ${t.target_date}` : ''})${progress}`;
+    });
     const more = model.tracks.length - MAX_TRACKS;
     lines.push(`Tracks: ${shown.join(' · ')}${more > 0 ? ` (+${more} more)` : ''}`);
   }

@@ -2,20 +2,25 @@ import { load as yamlLoad } from 'js-yaml';
 import {
   masteryFileSchema,
   profileFrontmatterSchema,
+  roadmapFileSchema,
   srsQueueFileSchema,
   trackFileSchema,
+  trackBriefFrontmatterSchema,
 } from '@eduagent/shared';
 import { describe, expect, it } from 'vitest';
 import { ONBOARDING_FILE_TEMPLATES } from '../src/prompts/modes/onboarding.js';
+import { PLAN_FILE_TEMPLATES } from '../src/prompts/modes/plan.js';
 import {
   buildContextEnvelope,
   buildLearnInstructions,
   buildOnboardingInstructions,
+  buildPlanInstructions,
   buildReviewInstructions,
   estimateTokens,
   formatReviewDueNotes,
   MODE_INSTRUCTIONS_TOKEN_BUDGET,
   ONBOARDING_INSTRUCTIONS_TOKEN_BUDGET,
+  PLAN_INSTRUCTIONS_TOKEN_BUDGET,
   readSkillSource,
   REVIEW_KICKOFF_INPUT,
   SKILL_NAMES,
@@ -111,6 +116,61 @@ describe('mode templates (plans/03 §6.3–6.4)', () => {
     ).not.toThrow();
     expect(() => srsQueueFileSchema.parse(yamlLoad(ONBOARDING_FILE_TEMPLATES.srs))).not.toThrow();
   });
+
+  it('plan instructions carry valid inline templates and stay in budget', () => {
+    const text = buildPlanInstructions({
+      sessionToken: TOKEN,
+      trackSlug: 'sql-interview',
+      needsProfile: true,
+      learnerName: 'Alex',
+      intake: {
+        subject: 'SQL Interview Prep',
+        goalType: 'interview',
+        sourceKind: 'job-description',
+        sourceText: 'SQL joins and query optimization',
+        currentLevel: 'intermediate',
+        style: 'drill-first',
+        totalDays: 5,
+        studyDays: ['mon', 'wed', 'fri'],
+        minutesPerDay: 45,
+      },
+    });
+    for (const snippet of Object.values(PLAN_FILE_TEMPLATES)) expect(text).toContain(snippet);
+    expect(() => trackFileSchema.parse(yamlLoad(PLAN_FILE_TEMPLATES.track))).not.toThrow();
+    expect(() => roadmapFileSchema.parse(yamlLoad(PLAN_FILE_TEMPLATES.roadmap))).not.toThrow();
+    expect(() =>
+      trackBriefFrontmatterSchema.parse(yamlLoad(PLAN_FILE_TEMPLATES.briefFrontmatter)),
+    ).not.toThrow();
+    expect(text).toContain('profile: initialize learner model');
+    expect(text).toContain('preferences.style: socratic');
+    expect(estimateTokens(text)).toBeLessThanOrEqual(PLAN_INSTRUCTIONS_TOKEN_BUDGET);
+  });
+
+  it('track learn instructions compose teach/revise/mistakes context', () => {
+    const base = {
+      sessionToken: TOKEN,
+      topicSlug: 'sql',
+      trackSlug: 'sql-interview',
+      roadmapDay: 3,
+      dayTitle: 'JOIN foundations',
+      daySubtopics: ['Join keys', 'INNER JOIN result shapes'],
+    } as const;
+    const teach = buildLearnInstructions({ ...base, intent: 'teach' });
+    expect(teach).toContain('Day 3');
+    expect(teach).toContain('tracks/sql-interview/brief.md');
+    expect(teach).toContain('roadmap_day: 3');
+    expect(teach).toContain('ui_session_wrap');
+    const revise = buildLearnInstructions({ ...base, intent: 'revise' });
+    expect(revise).toContain('REVISION');
+    expect(revise).toContain('retrieval practice first');
+    const mistakes = buildLearnInstructions({
+      ...base,
+      intent: 'mistakes',
+      mistakesEvidence: 'Exercise ex-7 failed: WHERE removed NULL rows',
+    });
+    expect(mistakes).toContain('Exercise ex-7 failed');
+    expect(mistakes).toContain('actual mistakes');
+  });
 });
 
 describe('buildContextEnvelope', () => {
@@ -143,6 +203,7 @@ describe('formatReviewDueNotes', () => {
   const model = (items: LearnerModel['srs']['items']): LearnerModel => ({
     profile: null,
     tracks: [],
+    roadmaps: [],
     topics: [
       {
         topic: 'sql',

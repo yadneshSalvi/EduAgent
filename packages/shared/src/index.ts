@@ -6,3 +6,4 @@ export * from './mcp-tools';
 export * from './ws-events';
 export * from './dashboard';
 export * from './api';
+export * from './tracks';

@@ -16,9 +16,17 @@
  * thread/inject_items instead (see resume()).
  */
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Prisma, PrismaClient, Thread } from '@prisma/client';
-import { localDate, type ThreadMode, type WsEvent } from '@eduagent/shared';
+import {
+  localDate,
+  sessionLogFrontmatterSchema,
+  trackIntakeSchema,
+  type TrackIntake,
+  type ThreadMode,
+  type WsEvent,
+} from '@eduagent/shared';
 import type { AppServerClient, CodexLogger, ThreadEvent } from '../codex/index.js';
 import { parseExamConfig, type ExamTarget } from '../learning/exam-config.js';
 import {
@@ -27,10 +35,11 @@ import {
   buildExamGradeInstructions,
   buildLearnInstructions,
   buildOnboardingInstructions,
+  buildPlanInstructions,
   buildReviewInstructions,
   formatReviewDueNotes,
 } from '../prompts/index.js';
-import { formatStateDigest } from '../workspace/index.js';
+import { formatStateDigest, parseFrontmatterFile } from '../workspace/index.js';
 import type { MemoryPipeline, WorkspaceManager } from '../workspace/index.js';
 
 /** Fixed input line for the auto-greeting turn run when a thread is created. */
@@ -93,6 +102,19 @@ export interface ExamThreadService extends ThreadService {
    * instructions at submit).
    */
   invalidateInstructions(thread: Thread): void;
+}
+
+/** TrackService's thread operations, including the shared workspace queue. */
+export interface TrackThreadService extends ThreadService {
+  runExclusive<T>(userId: string, job: () => Promise<T>): Promise<T>;
+  createPlanThread(
+    userId: string,
+    opts: { trackSlug: string; intake: TrackIntake },
+  ): Promise<Thread>;
+  createTrackSession(
+    userId: string,
+    opts: { trackSlug: string; day: number; intent: 'teach' | 'revise' | 'mistakes' },
+  ): Promise<Thread>;
 }
 
 export interface ThreadManagerDeps {
@@ -205,7 +227,7 @@ export function maskExamArtifacts(label: string): string {
     .replace(/\b(?:solution|answer[_-]key|rubric)s?\//gi, '████/');
 }
 
-export class ThreadManager implements ExamThreadService {
+export class ThreadManager implements ExamThreadService, TrackThreadService {
   private readonly prisma: PrismaClient;
   private readonly client: AppServerClient;
   private readonly workspaces: WorkspaceManager;
@@ -277,6 +299,106 @@ export class ThreadManager implements ExamThreadService {
     );
     this.pendingEnsures.set(key, promise);
     return promise;
+  }
+
+  /**
+   * Runs non-turn workspace work behind the SAME per-user tail as turns.
+   * Jobs passed here must never enqueue or await a turn: doing so would wait
+   * on their own queue slot forever.
+   */
+  runExclusive<T>(userId: string, job: () => Promise<T>): Promise<T> {
+    return this.enqueue(this.turnQueues, userId, job);
+  }
+
+  /** Always-new plan thread. TrackService owns the kickoff and reconciliation. */
+  async createPlanThread(
+    userId: string,
+    opts: { trackSlug: string; intake: TrackIntake },
+  ): Promise<Thread> {
+    const workspace = await this.workspaces.ensureWorkspace(userId);
+    const sessionToken = randomUUID();
+    const needsProfile = !(await this.workspaces.hasCommittedProfile(userId));
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const developerInstructions = buildPlanInstructions({
+      sessionToken,
+      trackSlug: opts.trackSlug,
+      intake: opts.intake,
+      needsProfile,
+      learnerName: user?.displayName ?? 'Learner',
+    });
+    const started = await this.client.startThread({
+      cwd: workspace.path,
+      developerInstructions,
+    });
+    const thread = await this.prisma.thread.create({
+      data: {
+        userId,
+        codexThreadId: started.thread.id,
+        mode: 'plan',
+        trackSlug: opts.trackSlug,
+        title: `Planning — ${opts.intake.subject}`,
+        sessionToken,
+      },
+    });
+    this.resumedThreads.add(thread.codexThreadId);
+    this.attach(thread);
+    return thread;
+  }
+
+  /** Always-new roadmap sitting; legacy find-or-create is never consulted. */
+  async createTrackSession(
+    userId: string,
+    opts: { trackSlug: string; day: number; intent: 'teach' | 'revise' | 'mistakes' },
+  ): Promise<Thread> {
+    const context = await this.trackSessionContext(userId, opts);
+    const workspace = await this.workspaces.ensureWorkspace(userId);
+    const sessionToken = randomUUID();
+    const developerInstructions = buildLearnInstructions({
+      sessionToken,
+      topicSlug: context.topicSlug,
+      isSessionStart: true,
+      trackSlug: opts.trackSlug,
+      roadmapDay: opts.day,
+      dayTitle: context.title,
+      daySubtopics: context.subtopics,
+      intent: opts.intent,
+      ...(context.mistakesEvidence !== null ? { mistakesEvidence: context.mistakesEvidence } : {}),
+    });
+    const started = await this.client.startThread({
+      cwd: workspace.path,
+      developerInstructions,
+    });
+    const title =
+      opts.intent === 'revise'
+        ? `Day ${opts.day} — revisited`
+        : opts.intent === 'mistakes'
+          ? `Day ${opts.day} — fixing gaps`
+          : `Day ${opts.day} — ${context.title}`;
+    const thread = await this.prisma.thread.create({
+      data: {
+        userId,
+        codexThreadId: started.thread.id,
+        mode: 'learn',
+        topicSlug: context.topicSlug,
+        trackSlug: opts.trackSlug,
+        roadmapDay: opts.day,
+        intent: opts.intent,
+        title,
+        sessionToken,
+      },
+    });
+    this.resumedThreads.add(thread.codexThreadId);
+    this.attach(thread);
+    void this.enqueueTurn(thread, GREETING_INPUT, 'system').catch((err: unknown) => {
+      this.log.error({ err, threadId: thread.id }, 'track-session greeting turn failed');
+      this.emitTurnEvent(thread, {
+        type: 'turn.error',
+        threadId: thread.id,
+        message: 'The tutor could not open the session. Send a message to try again.',
+        retryable: true,
+      });
+    });
+    return thread;
   }
 
   /**
@@ -436,7 +558,7 @@ export class ThreadManager implements ExamThreadService {
     topicSlug: string | null,
   ): Promise<EnsureThreadResult> {
     const existing = await this.prisma.thread.findFirst({
-      where: { userId, mode, topicSlug, status: 'active' },
+      where: { userId, mode, topicSlug, roadmapDay: null, status: 'active' },
       orderBy: { createdAt: 'asc' },
     });
     if (existing) {
@@ -494,6 +616,9 @@ export class ThreadManager implements ExamThreadService {
     userId: string;
     mode: ThreadMode;
     topicSlug: string | null;
+    trackSlug?: string | null;
+    roadmapDay?: number | null;
+    intent?: string | null;
     sessionToken: string;
     onboarded: boolean;
     /** Thread ROW id — required to rebuild exam instructions from the Exam row. */
@@ -501,6 +626,22 @@ export class ThreadManager implements ExamThreadService {
   }): Promise<string> {
     if (opts.mode === 'exam') {
       return this.examInstructions(opts.threadRowId, opts.sessionToken);
+    }
+    if (opts.mode === 'plan') {
+      if (!opts.trackSlug) throw new Error('plan instructions need a track slug');
+      const track = await this.prisma.track.findUnique({
+        where: { userId_slug: { userId: opts.userId, slug: opts.trackSlug } },
+      });
+      if (!track) throw new Error(`plan thread has no Track row for ${opts.trackSlug}`);
+      const intake = trackIntakeSchema.parse(track.intake);
+      const user = await this.prisma.user.findUnique({ where: { id: opts.userId } });
+      return buildPlanInstructions({
+        sessionToken: opts.sessionToken,
+        trackSlug: opts.trackSlug,
+        intake,
+        needsProfile: !opts.onboarded,
+        learnerName: user?.displayName ?? 'Learner',
+      });
     }
     // Review threads exist only for learners with an SRS queue (ReviewService
     // guards on due items), so the onboarding branch never applies to them.
@@ -565,6 +706,108 @@ export class ThreadManager implements ExamThreadService {
     });
   }
 
+  /** Resolves the versioned roadmap context and bounded real mistake evidence. */
+  private async trackSessionContext(
+    userId: string,
+    opts: { trackSlug: string; day: number; intent: 'teach' | 'revise' | 'mistakes' },
+  ): Promise<{
+    title: string;
+    topicSlug: string;
+    subtopics: string[];
+    mistakesEvidence: string | null;
+  }> {
+    const model = await this.workspaces.readLearnerModel(userId);
+    const roadmap = model.roadmaps.find((candidate) => candidate.track === opts.trackSlug);
+    const day = roadmap?.days.find((candidate) => candidate.day === opts.day);
+    const topicSlug = day?.topics[0]?.topic;
+    if (!day || !topicSlug) {
+      throw new Error(`roadmap day ${opts.day} does not exist for ${opts.trackSlug}`);
+    }
+    if (opts.intent !== 'mistakes') {
+      return { title: day.title, topicSlug, subtopics: day.subtopics, mistakesEvidence: null };
+    }
+
+    const concepts = new Set(
+      day.topics.flatMap((topic) =>
+        topic.concepts.flatMap((concept) => [concept, `${topic.topic}/${concept}`]),
+      ),
+    );
+    const evidence: string[] = [];
+
+    // Misconceptions are markdown, not database rows. Keep only blocks that
+    // name a concept from this day; never dump an unrelated learner history.
+    for (const topic of new Set(day.topics.map((entry) => entry.topic))) {
+      try {
+        const raw = await fs.readFile(
+          path.join(this.workspaces.pathFor(userId), `topics/${topic}/misconceptions.md`),
+          'utf8',
+        );
+        const blocks = raw.split(/(?=^##\s)/m);
+        for (const block of blocks) {
+          if (
+            /^##\s*\[OPEN\]/m.test(block) &&
+            [...concepts].some((concept) => block.includes(concept))
+          ) {
+            evidence.push(`Open misconception: ${clip(block, 420)}`);
+          }
+        }
+      } catch {
+        // Missing misconception files are normal for new topics.
+      }
+    }
+
+    // Exercise.concepts is opaque SQLite Json: fetch rows, then filter in JS.
+    const exercises = await this.prisma.exercise.findMany({
+      where: { userId },
+      include: { attempts: { orderBy: { createdAt: 'desc' } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    for (const exercise of exercises) {
+      const refs = Array.isArray(exercise.concepts)
+        ? exercise.concepts.filter((value): value is string => typeof value === 'string')
+        : [];
+      if (!refs.some((concept) => concepts.has(concept))) continue;
+      const attempt = exercise.attempts.find(
+        (candidate) => candidate.verdict === 'failed' || candidate.verdict === 'error',
+      );
+      if (!attempt) continue;
+      evidence.push(
+        `Exercise ${exercise.slug} (${exercise.title}): ${attempt.verdict}; ` +
+          clip(attempt.feedback ?? 'no feedback recorded', 260),
+      );
+    }
+
+    try {
+      const sessionsDir = path.join(this.workspaces.pathFor(userId), 'sessions');
+      for (const file of await fs.readdir(sessionsDir)) {
+        if (!file.endsWith('.md')) continue;
+        try {
+          const raw = await fs.readFile(path.join(sessionsDir, file), 'utf8');
+          const parsed = parseFrontmatterFile(sessionLogFrontmatterSchema, raw);
+          if (
+            parsed.frontmatter.track === opts.trackSlug &&
+            parsed.frontmatter.roadmap_day === opts.day &&
+            parsed.frontmatter.next_time
+          ) {
+            evidence.push(`Session next-time pointer: ${clip(parsed.frontmatter.next_time, 260)}`);
+          }
+        } catch {
+          // Invalid logs are surfaced by the normal repair path; skip as evidence.
+        }
+      }
+    } catch {
+      // A new workspace may have no session logs.
+    }
+
+    const bounded = evidence.join('\n').slice(0, 2_400);
+    return {
+      title: day.title,
+      topicSlug,
+      subtopics: day.subtopics,
+      mistakesEvidence: bounded || 'No recorded mistake evidence; begin with retrieval.',
+    };
+  }
+
   private titleFor(mode: ThreadMode, topicSlug: string | null, onboarded: boolean): string {
     if (mode === 'review') return 'Review session';
     if (!onboarded) return 'Getting to know you';
@@ -596,6 +839,9 @@ export class ThreadManager implements ExamThreadService {
       userId: thread.userId,
       mode: thread.mode as ThreadMode,
       topicSlug: thread.topicSlug,
+      trackSlug: thread.trackSlug,
+      roadmapDay: thread.roadmapDay,
+      intent: thread.intent,
       sessionToken: thread.sessionToken,
       onboarded,
       threadRowId: thread.id,

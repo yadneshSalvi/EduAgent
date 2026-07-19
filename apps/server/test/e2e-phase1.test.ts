@@ -276,7 +276,7 @@ describe.runIf(enabled)('Phase 1 golden path (real codex)', () => {
         'Please skip further questions and the baseline quiz (not available here) — ' +
         'write my profile, track, and mastery seed now and commit.';
       const nudge =
-        'Do it now without asking anything else: write profile.md, tracks/<track>.yaml, ' +
+        'Do it now without asking anything else: write profile.md, tracks/<track>/track.yaml, ' +
         'seed mastery, then git commit as instructed.';
       let commitSeen = false;
       let nudges = 0;
