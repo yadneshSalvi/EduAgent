@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
@@ -258,7 +259,10 @@ function LogSheet({
     return () => document.removeEventListener('keydown', keydown);
   }, [onClose, open]);
 
-  return (
+  // Portal to <body>: the sheet mounts inside the sticky sidebar, and
+  // position:sticky always creates a stacking context — without the portal the
+  // page's main column paints OVER the fixed z-[70] sheet.
+  return createPortal(
     <div
       className={cn('fixed inset-0 z-[70]', !open && 'pointer-events-none')}
       role="dialog"
@@ -332,7 +336,8 @@ function LogSheet({
           </div>
         </div>
       </motion.section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

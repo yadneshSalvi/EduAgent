@@ -22,6 +22,9 @@ export default tseslint.config(
       'scripts/fixtures/**',
       // Emitted verbatim by `codex app-server generate-ts` — never hand-edited.
       'packages/shared/src/protocol/generated/**',
+      // Agent-skill tooling assets (installed by skill managers, not app code).
+      '.agents/**',
+      '.claude/**',
     ],
   },
   js.configs.recommended,
