@@ -237,28 +237,37 @@ export class TrackService {
             `${roadmapRaw === null ? 'roadmap.yaml' : 'track.yaml'} is missing at HEAD`,
         );
       }
-      let roadmap = parseArtifact(roadmapFileSchema, roadmapRaw, `tracks/${slug}/roadmap.yaml`);
-      let curriculum = parseArtifact(trackFileSchema, trackRaw, `tracks/${slug}/track.yaml`);
-      if (roadmap.track !== slug || curriculum.track !== slug) {
-        // Otherwise-valid files with a parroted `track:` value (QA gate 1 F1):
-        // deterministic server-side repair beats failing the whole generation.
-        const repaired = await this.normalizeTrackField(userId, slug, {
-          roadmap: roadmap.track === slug ? null : roadmapRaw,
-          curriculum: curriculum.track === slug ? null : trackRaw,
-        });
-        roadmap = parseArtifact(
-          roadmapFileSchema,
-          repaired.roadmap ?? roadmapRaw,
-          `tracks/${slug}/roadmap.yaml`,
-        );
-        curriculum = parseArtifact(
+      const roadmap = parseArtifact(roadmapFileSchema, roadmapRaw, `tracks/${slug}/roadmap.yaml`);
+      const curriculum = parseArtifact(trackFileSchema, trackRaw, `tracks/${slug}/track.yaml`);
+      // Server-side repairs at activation (QA gates 1 F1 + 2 G2): a parroted
+      // `track:` value is corrected instead of failing the generation, and the
+      // agent's roadmap YAML is rewritten in completeDay's canonical dump
+      // style — otherwise the FIRST live completion diffs as whole-file
+      // serializer churn instead of a clean status flip.
+      const slugWrong = roadmap.track !== slug || curriculum.track !== slug;
+      roadmap.track = slug;
+      const canonicalRoadmap = dumpRoadmap(roadmap);
+      let repairedCurriculum: string | null = null;
+      if (curriculum.track !== slug) {
+        repairedCurriculum = trackRaw.replace(/^track:.*$/m, `track: ${slug}`);
+        const reparsed = parseArtifact(
           trackFileSchema,
-          repaired.curriculum ?? trackRaw,
+          repairedCurriculum,
           `tracks/${slug}/track.yaml`,
         );
-        if (roadmap.track !== slug || curriculum.track !== slug) {
+        if (reparsed.track !== slug) {
           throw new Error(`the track: field could not be normalized to "${slug}"`);
         }
+        curriculum.track = slug;
+      }
+      if (canonicalRoadmap !== roadmapRaw || repairedCurriculum !== null) {
+        await this.commitNormalizedArtifacts(userId, slug, {
+          roadmap: canonicalRoadmap !== roadmapRaw ? canonicalRoadmap : null,
+          curriculum: repairedCurriculum,
+          message: slugWrong
+            ? `plan(${slug}): normalize track slug\n\n- Rewrote the track: field to match the directory name`
+            : `plan(${slug}): normalize roadmap format\n\n- Canonical serialization so day completions diff as clean status flips`,
+        });
       }
       const curriculumConcepts = new Set(curriculum.items.map((item) => item.concept));
       const unknownConcepts = unique(
@@ -291,41 +300,28 @@ export class TrackService {
   }
 
   /**
-   * Rewrites the `track:` line of the given raw files to the directory slug
-   * and commits the repair — serialized with turns like every server-side
-   * workspace write. Returns the repaired raw contents.
+   * Writes the given repaired plan-artifact contents and commits them —
+   * serialized with turns like every server-side workspace write.
    */
-  private async normalizeTrackField(
+  private async commitNormalizedArtifacts(
     userId: string,
     slug: string,
-    raws: { roadmap: string | null; curriculum: string | null },
-  ): Promise<{ roadmap: string | null; curriculum: string | null }> {
-    const fix = (raw: string): string => raw.replace(/^track:.*$/m, `track: ${slug}`);
-    const repaired = {
-      roadmap: raws.roadmap === null ? null : fix(raws.roadmap),
-      curriculum: raws.curriculum === null ? null : fix(raws.curriculum),
-    };
+    repair: { roadmap: string | null; curriculum: string | null; message: string },
+  ): Promise<void> {
     await this.threads.runExclusive(userId, async () => {
       const git = this.workspaces.git(userId);
       const sinceSha = await git.headSha();
       const dir = this.workspaces.pathFor(userId);
-      if (repaired.roadmap !== null) {
-        await fs.writeFile(path.join(dir, `tracks/${slug}/roadmap.yaml`), repaired.roadmap, 'utf8');
+      if (repair.roadmap !== null) {
+        await fs.writeFile(path.join(dir, `tracks/${slug}/roadmap.yaml`), repair.roadmap, 'utf8');
       }
-      if (repaired.curriculum !== null) {
-        await fs.writeFile(
-          path.join(dir, `tracks/${slug}/track.yaml`),
-          repaired.curriculum,
-          'utf8',
-        );
+      if (repair.curriculum !== null) {
+        await fs.writeFile(path.join(dir, `tracks/${slug}/track.yaml`), repair.curriculum, 'utf8');
       }
-      await git.commitAll(
-        `plan(${slug}): normalize track slug\n\n- Rewrote the track: field to match the directory name`,
-      );
+      await git.commitAll(repair.message);
       await this.memory.emitCommits(userId, sinceSha);
     });
-    this.logger.warn({ userId, slug }, 'normalized parroted track slug in plan artifacts');
-    return repaired;
+    this.logger.warn({ userId, slug }, 'normalized plan artifacts at activation');
   }
 
   private failureKey(userId: string, slug: string): string {
@@ -492,7 +488,7 @@ export class TrackService {
       const reflowed = roadmap.days.filter((candidate) => candidate.status === 'upcoming').length;
       await fs.writeFile(
         path.join(this.workspaces.pathFor(userId), roadmapPath),
-        yamlDump(roadmap, { noRefs: true, lineWidth: -1 }),
+        dumpRoadmap(roadmap),
         'utf8',
       );
       const message = [
@@ -688,6 +684,16 @@ export class TrackService {
     }
     return result;
   }
+}
+
+/**
+ * THE canonical roadmap.yaml serialization: completeDay rewrites the file with
+ * it on every completion, and reconcileGeneration canonicalizes agent-written
+ * YAML into it at activation (QA G2) — so completion diffs are status flips,
+ * never serializer churn. The seeder mirrors these exact options.
+ */
+function dumpRoadmap(roadmap: RoadmapFile): string {
+  return yamlDump(roadmap, { noRefs: true, lineWidth: -1 });
 }
 
 /**

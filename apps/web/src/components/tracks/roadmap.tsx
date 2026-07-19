@@ -310,13 +310,25 @@ function DayCard({
             ) : null}
             {state === 'in-progress' ? (
               <div className="flex flex-wrap gap-2">
+                {/* A non-complete HEAD day always offers a primary teach action
+                    (QA G1): Resume only when a live thread exists; log-only
+                    history still gets Start. Revise/mistakes stay secondary. */}
                 {latestThreadId ? (
-                  <Button asChild variant="ghost">
+                  <Button asChild>
                     <Link href={`/app/tracks/${detail.slug}/s/${latestThreadId}`}>
                       Resume session
                     </Link>
                   </Button>
-                ) : null}
+                ) : (
+                  <Button disabled={starting} onClick={() => start('teach')}>
+                    {starting ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden />
+                    ) : (
+                      <Play className="size-4" aria-hidden />
+                    )}
+                    Start Day {day.day}
+                  </Button>
+                )}
                 <Button variant="outline" disabled={starting} onClick={() => start('revise')}>
                   <RotateCcw className="size-4" aria-hidden />
                   Revise this topic
@@ -392,10 +404,16 @@ export function Roadmap({ slug, born = false }: { slug: string; born?: boolean }
     return () => observer.disconnect();
   }, [detail.data?.roadmap]);
 
+  // Only ACTIVE thread sessions are resumable; log-backed (seeded) history and
+  // archived threads must not swallow the day's primary teach action (QA G1).
   const latestByDay = useMemo(() => {
     const map = new Map<number, string>();
     for (const session of sessions.data?.sessions ?? []) {
-      if (session.kind === 'thread' && !map.has(session.roadmapDay)) {
+      if (
+        session.kind === 'thread' &&
+        session.thread.status === 'active' &&
+        !map.has(session.roadmapDay)
+      ) {
         map.set(session.roadmapDay, session.thread.id);
       }
     }

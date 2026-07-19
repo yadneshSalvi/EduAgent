@@ -406,6 +406,63 @@ describe('TrackService', () => {
     ).toBe(true);
   });
 
+  it('canonicalizes agent-written roadmap style at activation so completions diff cleanly (QA G2)', async () => {
+    const slug = 'sql-interview';
+    await workspaces.ensureWorkspace(USER);
+    await write(
+      `tracks/${slug}/track.yaml`,
+      `track: ${slug}\ndisplay_name: SQL Interview\nitems:\n  - concept: joins\n    topic: sql\n    weight: 1.5\n`,
+    );
+    // Messy-but-valid agent style: unquoted dates, inline arrays — everything
+    // the js-yaml dump renders differently.
+    await write(
+      `tracks/${slug}/roadmap.yaml`,
+      [
+        `track: ${slug}`,
+        'created: 2026-07-19',
+        'schedule: { study_days: [mon, wed, fri], minutes_per_day: 45, start_date: 2026-07-19 }',
+        'days:',
+        ...Array.from({ length: 5 }, (_, index) =>
+          [
+            `  - { day: ${index + 1}, title: Topic ${index + 1}, status: upcoming,`,
+            '    topics: [{ topic: sql, concepts: [joins] }], subtopics: [A, B] }',
+          ].join('\n'),
+        ),
+      ].join('\n') + '\n',
+    );
+    await workspaces.git(USER).commitAll(`plan(${slug}): create roadmap — 5 days`);
+    await prisma.track.create({
+      data: {
+        userId: USER,
+        slug,
+        title: 'SQL Interview',
+        goalType: 'interview',
+        status: 'generating',
+        intake: INTAKE as Prisma.InputJsonValue,
+        accent: 'violet',
+      },
+    });
+
+    await service.reconcileGeneration(USER, slug);
+
+    expect((await prisma.track.findFirstOrThrow({ where: { slug } })).status).toBe('active');
+    const git = workspaces.git(USER);
+    expect((await git.log({ maxCount: 1 }))[0]?.message).toContain(
+      `plan(${slug}): normalize roadmap format`,
+    );
+    // Canonical = idempotent under the roadmap dump the server uses.
+    const raw = (await git.fileAtRef('HEAD', `tracks/${slug}/roadmap.yaml`))!;
+    const { load, dump } = await import('js-yaml');
+    const { roadmapFileSchema } = await import('@eduagent/shared');
+    expect(raw).toBe(dump(roadmapFileSchema.parse(load(raw)), { noRefs: true, lineWidth: -1 }));
+
+    await service.completeDay(USER, slug, 1);
+    const completion = (await git.log({ maxCount: 1 }))[0]!;
+    expect(completion.message).toContain(`plan(${slug}): day 1 complete`);
+    const { stats } = await git.diffForCommit(completion.sha);
+    expect(stats).toEqual({ filesChanged: 1, insertions: 2, deletions: 1 });
+  });
+
   it('feeds the reconciliation error into the retry kickoff (QA F1b)', async () => {
     const created = await service.create(USER, INTAKE);
     expect(threads.kickoffInputs.at(-1)).toBe('[plan-roadmap]');
