@@ -7,7 +7,20 @@
 #   docker compose --env-file .env.production \
 #     -f docker-compose.yml -f docker-compose.seccomp.yml up -d
 
+# DEPLOYED RECIPE (2026-07-19, eduagent.aiquantized.com — branch 2 EXTENDED):
+# codex 0.144.4 sandboxes via bundled bubblewrap on Linux, which needs
+# unprivileged user namespaces + mount propagation inside the container:
+#   1. host sysctl: kernel.apparmor_restrict_unprivileged_userns=0
+#      (persisted in /etc/sysctl.d/99-eduagent-userns.conf)
+#   2. the seccomp profile below (moby v28.3.3 default + landlock_* +
+#      clone/clone3/unshare/setns/mount/umount2/pivot_root/sethostname)
+#   3. apparmor:unconfined on the server service ONLY (docker-default AppArmor
+#      denies bwrap's "make / slave" mount step; seccomp + cap-drops remain)
+# Keep it sticky for cron/scripts: COMPOSE_FILE=docker-compose.yml:docker-compose.seccomp.yml
+# lives in .env.production on the VPS (and in the deploy user's crontab).
+
 services:
   server:
     security_opt:
       - seccomp:./deploy/seccomp/codex-landlock.json
+      - apparmor:unconfined

@@ -128,6 +128,25 @@ workspace. This preserves Alex's linked User row and does not change the nightly
 
 ## 7. Sandbox decision tree (plans/08 §4) — RUN THIS BEFORE ANNOUNCING THE URL
 
+> **RESOLVED 2026-07-19 (production, eduagent.aiquantized.com): branch 2 EXTENDED wins.**
+> Branch 1 failed: codex 0.144.4 sandboxes via bundled **bubblewrap** on Linux —
+> `bwrap: No permissions to create a new namespace` (Ubuntu 24.04's
+> `kernel.apparmor_restrict_unprivileged_userns=1` + Docker default seccomp), then
+> `bwrap: Failed to make / slave: Permission denied` (docker-default AppArmor mount
+> mediation). Winning recipe (evidence: probe = inside-write PASS, outside-write
+> blocked PASS, network denied PASS):
+> 1. host: `sysctl kernel.apparmor_restrict_unprivileged_userns=0` (persisted in
+>    `/etc/sysctl.d/99-eduagent-userns.conf`);
+> 2. `deploy/seccomp/codex-landlock.json` (committed) = moby v28.3.3 default profile
+>    + `landlock_*` + `clone,clone3,unshare,setns,mount,umount2,pivot_root,sethostname`;
+> 3. `apparmor:unconfined` on the **server service only** (see
+>    `docker-compose.seccomp.yml`).
+> Sticky via `COMPOSE_FILE=docker-compose.yml:docker-compose.seccomp.yml` in
+> `.env.production` AND in the deploy user's crontab — every script and cron job
+> inherits the override. NOTE: the moby profile URL on `master`/`main` 404s now —
+> fetch from a release tag, e.g.
+> `https://raw.githubusercontent.com/moby/moby/v28.3.3/profiles/seccomp/default.json`.
+
 Codex's Linux sandbox is Landlock/seccomp; Docker's seccomp profile may block
 it. Take the FIRST branch that passes, then **record the winning branch +
 evidence in this file and the README** so self-hosting judges inherit it.

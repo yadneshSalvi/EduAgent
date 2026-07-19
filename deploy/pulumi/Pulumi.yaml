@@ -1,0 +1,6 @@
+name: eduagent-vps
+description: EduAgent demo VPS on Hetzner Cloud (Ubuntu 24.04 + Docker, fronted by Caddy from docker-compose)
+runtime:
+  name: python
+  options:
+    virtualenv: venv

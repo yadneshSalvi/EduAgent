@@ -143,6 +143,12 @@ and refined by live E2E autopsies. Highlights:
   `excludeSlashTmp` + `excludeTmpdirEnvVar` so exercise files can't escape the workspace.
 - **An `OPENAI_API_KEY` env var alone does not authenticate the app-server** — headless auth
   requires `codex login --with-api-key` writing `auth.json` under the target `CODEX_HOME`.
+- **Codex's Linux sandbox (bundled bubblewrap) needs user namespaces inside Docker.** On an
+  Ubuntu 24.04 host the default Docker profiles block it twice (AppArmor userns restriction,
+  then mount propagation). Our production recipe — one host sysctl + a committed seccomp
+  profile ([`deploy/seccomp/codex-landlock.json`](deploy/seccomp/codex-landlock.json)) +
+  `apparmor:unconfined` on the server service only — is recorded with probe evidence in
+  [`docs/DEPLOY_RUNBOOK.md`](docs/DEPLOY_RUNBOOK.md) §7 (`docker-compose.seccomp.yml`).
 
 ## Built with Codex
 
