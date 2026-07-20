@@ -13,7 +13,7 @@ and you can watch it diff your brain.
 [![Tests: 562 passing](https://img.shields.io/badge/tests-562%20passing-brightgreen)](#run-it)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-**[▶ Watch the 3-minute demo]([VIDEO_URL])** · **[Try the hosted demo]([DEMO_URL])** · **[Run it locally](#run-it)**
+**[▶ Watch the 3-minute demo]([VIDEO_URL])** · **[Try the hosted demo](https://eduagent.aiquantized.com)** · **[Run it locally](#run-it)**
 
 <!-- TEAM: record the 30-second commit-moment GIF (lesson → commit toast → diff drawer with
      [OPEN] → [RESOLVED]) and save it as docs/assets/commit-moment.gif, then replace this
@@ -227,7 +227,7 @@ registration — and drive it over HTTP + WS only. Dashboard scores Lighthouse 9
 
 ### Try it now (hosted)
 
-**[DEMO_URL]** — click **"Explore as Alex"** and enter the access code from our Devpost
+**[eduagent.aiquantized.com](https://eduagent.aiquantized.com)** — click **"Explore as Alex"** and enter the access code from our Devpost
 testing instructions. You get the seeded learner: three weeks of history, 140+ memory commits,
 a review queue due today, and an exam one click away.
 
@@ -318,7 +318,7 @@ any other agent.
 
 ## Team & license
 
-Built by the EduAgent team for the OpenAI Build Week Hackathon (Education), July 2026.
-<!-- TEAM: add names/links before submission -->
+Built by **Yadnesh Salvi** ([@yadneshSalvi](https://github.com/yadneshSalvi)) for the
+OpenAI Build Week Hackathon (Education), July 2026 — solo, with Codex as the pair programmer.
 
-[MIT](LICENSE) — copyright 2026 the EduAgent team.
+[MIT](LICENSE) — copyright 2026 Yadnesh Salvi.
