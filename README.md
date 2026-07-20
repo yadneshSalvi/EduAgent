@@ -13,7 +13,7 @@ and you can watch it diff your brain.
 [![Tests: 562 passing](https://img.shields.io/badge/tests-562%20passing-brightgreen)](#run-it)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-**[▶ Watch the 3-minute demo]([VIDEO_URL])** · **[Try the hosted demo](https://eduagent.aiquantized.com)** · **[Run it locally](#run-it)**
+**[▶ Watch the 3-minute demo](https://youtu.be/gFn94yc_cNs)** · **[Try the hosted demo](https://eduagent.aiquantized.com)** · **[Run it locally](#run-it)**
 
 <!-- TEAM: record the 30-second commit-moment GIF (lesson → commit toast → diff drawer with
      [OPEN] → [RESOLVED]) and save it as docs/assets/commit-moment.gif, then replace this
