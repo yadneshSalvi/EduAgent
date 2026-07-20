@@ -402,3 +402,14 @@
     animation: none;
   }
 }
+
+/* Document scroll lock while the app shell is mounted: libraries append
+   helper DOM to <body> (portals, Monaco measurement nodes) which can make
+   the DOCUMENT taller than the viewport — focus or navigation then scrolls
+   the whole app out of view. The shell is a fixed-viewport surface; every
+   pane owns its own scrolling. Landing/login (no [data-app-shell]) keep
+   normal document scrolling. */
+body:has([data-app-shell]) {
+  height: 100dvh;
+  overflow: hidden;
+}
