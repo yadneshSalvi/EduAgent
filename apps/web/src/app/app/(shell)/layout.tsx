@@ -11,7 +11,11 @@ import { CommandPaletteProvider } from '@/components/shared/command-palette';
 export default function ShellLayout({ children }: { children: ReactNode }) {
   return (
     <CommandPaletteProvider>
-      <div className="flex min-h-dvh">
+      {/* h-dvh + overflow-hidden: the shell is a fixed-viewport app — the
+          document must never scroll (stray body-level helper DOM from portals
+          or Monaco otherwise lets focus/navigation shift the whole page).
+          Every pane owns its own scrolling. */}
+      <div className="flex h-dvh overflow-hidden">
         <AppSidebar />
         <main className="flex h-dvh flex-1 flex-col overflow-y-auto">{children}</main>
       </div>
