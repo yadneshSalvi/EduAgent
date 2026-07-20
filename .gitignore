@@ -1,6 +1,9 @@
 plans/
 .env
 
+# video production assets (large media, never for the public repo)
+videos/
+
 # dependencies
 node_modules/
 
